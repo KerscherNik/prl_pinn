@@ -21,8 +21,8 @@ def load_and_combine_data(file_paths):
     for file_path in file_paths:
         df = pd.read_csv(file_path, sep=';', decimal=',')  # Use semicolon as separator and comma as decimal
         print(f"Loaded {len(df)} samples from {file_path}")
-        print(df.head())
-        print("Columns: ", df.columns)
+        #print(df.head())
+        #print("Columns: ", df.columns)
         dataframes.append(df)
     
     combined_df = pd.concat(dataframes, ignore_index=True)

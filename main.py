@@ -3,11 +3,13 @@ from pinn_model import CartpolePINN
 from loss_functions import pinn_loss
 from train_utils import train_pinn, optimize_hyperparameters
 from evaluate import evaluate_pinn
-from gym_integration import PINNCartPoleEnv
+from compare_environments import compare_environments
 
 import torch
 
 def main():
+    # TODO: Implement option to choose friction prediction or only force prediction or both can compare models performance
+    
     # Define file paths
     file_paths = [
         "demonstration_data2018_1.csv",
@@ -25,7 +27,8 @@ def main():
         "l": 0.201,
         "g": 9.81,
         "mu_c": 0.1,  # Example value, adjust as needed
-        "mu_p": 0.01  # Example value, adjust as needed
+        "mu_p": 0.01,  # Example value, adjust as needed
+        "force_mag": 10.0  # Add this parameter for the PINN environment
     }
 
     # Hyperparameter optimization
@@ -43,18 +46,12 @@ def main():
     print("Evaluating model...")
     evaluate_pinn(trained_model, test_dataloader, params)
 
-    # Create Gym environment with trained PINN
-    print("Creating Gym environment with trained PINN...")
-    env = PINNCartPoleEnv(trained_model, params)
+    # Save the trained model
+    torch.save(trained_model.state_dict(), 'trained_pinn_model.pth')
 
-    # Example usage of the environment
-    print("Running example episode in Gym environment...")
-    obs = env.reset()
-    for _ in range(100):
-        action = env.action_space.sample()
-        obs, reward, done, _ = env.step(action)
-        if done:
-            obs = env.reset()
+    # Compare environments
+    print("Integrate and compare cartpole gym environments...")
+    compare_environments(trained_model, params)
 
     print("Done!")
 
