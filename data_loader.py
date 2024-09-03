@@ -5,16 +5,20 @@ from sklearn.model_selection import train_test_split
 
 class CartpoleDataset(Dataset):
     def __init__(self, dataframe):
-        # Keep only the numerical columns
-        self.data = dataframe[['cartPos', 'cartVel', 'pendPos', 'pendVel', 'action']]
-        self.data = self.data.astype(float)
+        self.data = dataframe[['cartPos', 'cartVel', 'pendPos', 'pendVel', 'action']].astype(float)
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         row = self.data.iloc[idx]
-        return torch.tensor(row.values, dtype=torch.float32)
+        return (
+            torch.tensor(row['cartPos'], dtype=torch.float32),
+            torch.tensor(row['cartVel'], dtype=torch.float32),
+            torch.tensor(row['pendPos'], dtype=torch.float32),
+            torch.tensor(row['pendVel'], dtype=torch.float32),
+            torch.tensor(row['action'], dtype=torch.float32)
+        )
 
 def load_and_combine_data(file_paths):
     dataframes = []
@@ -41,5 +45,11 @@ def get_dataloaders(file_paths, batch_size=32, test_size=0.2):
 
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    # Debug: Print the shape of the first batch
+    for batch in train_dataloader:
+        print("Batch shape:", [b.shape for b in batch])
+        print("Number of elements in batch:", len(batch))
+        break
 
     return train_dataloader, test_dataloader
