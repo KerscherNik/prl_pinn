@@ -48,6 +48,8 @@ def train_pinn(model, train_dataloader, optimizer, loss_fn, params, num_epochs, 
 
     return model, avg_loss
 
+# Defines the objective for Ray Tune's hyperparameter optimization
+# training loss and test loss
 def objective(config, train_dataloader, test_dataloader, params, predict_friction):
     model = CartpolePINN(predict_friction=predict_friction)
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
@@ -84,7 +86,7 @@ def objective(config, train_dataloader, test_dataloader, params, predict_frictio
 def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_friction):
     config = {
         "lr": tune.loguniform(1e-4, 1e-1),
-        "num_epochs": tune.choice([5]), # For simplicity, we only train for 5 epochs. Normaly 50, 100, 200 used here
+        "num_epochs": tune.choice([5]), # TODO: Why: For simplicity, we only train for 5 epochs. Normaly 50, 100, 200 used here
         "physics_weight": tune.uniform(0.1, 10.0)
     }
 
@@ -96,11 +98,13 @@ def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_
         reduction_factor=2
     )
 
+    # Command line reporter
     reporter = CLIReporter(
         parameter_columns=["lr", "num_epochs", "physics_weight"],
         metric_columns=["train_loss", "test_loss", "training_iteration"]
     )
 
+    # Tuning the hyperparameters
     result = tune.run(
         tune.with_parameters(
             objective, 

@@ -4,8 +4,10 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, r2_score
 from loss_functions import pinn_loss
 
+# Evaluate the PINN model on a test dataset and generate metrics and plots
+# Move data in batches to device, compute mse & physics loss, mean relative error
 def evaluate_pinn(model, dataloader, params):
-    model.eval()
+    model.eval() # Sets the model to evaluation mode
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     true_actions = []
@@ -14,7 +16,7 @@ def evaluate_pinn(model, dataloader, params):
     total_mse_loss = 0
     total_physics_loss = 0
 
-    with torch.no_grad():
+    with torch.no_grad(): # Disables gradient calc (reduce memory & speed up computation) - no training
         for batch in dataloader:
             x, x_dot, theta, theta_dot, action = [b.to(device) for b in batch]
 
