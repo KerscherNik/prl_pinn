@@ -1,6 +1,6 @@
 import torch
 
-def pinn_loss(model, x, x_dot, theta, theta_dot, action, params):
+def pinn_loss(model, x, x_dot, theta, theta_dot, action, params, physics_weight=1.0):
     t = torch.zeros_like(x)
     
     if model.predict_friction:
@@ -20,10 +20,12 @@ def pinn_loss(model, x, x_dot, theta, theta_dot, action, params):
         (theta_ddot - calculate_theta_ddot(action, x_dot, theta, theta_dot, mu_c, mu_p, params))**2
     )
     
-    if torch.isnan(mse_loss) or torch.isnan(physics_loss):
+    total_loss = mse_loss + physics_weight * physics_loss
+    
+    if torch.isnan(total_loss):
         raise ValueError("NaN encountered in loss computation")
     
-    return mse_loss + physics_loss
+    return total_loss, mse_loss, physics_loss
 
 def calculate_theta_ddot(F, x_dot, theta, theta_dot, mu_c, mu_p, params):
     m_c, m_p, l, g = params['m_c'], params['m_p'], params['l'], params['g']

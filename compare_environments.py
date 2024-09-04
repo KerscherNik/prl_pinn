@@ -26,14 +26,16 @@ def collect_trajectory(env, model, max_steps=500):
     return np.array(states), np.array(actions), np.array(rewards)
 
 
-def compare_environments(pinn_model, params):
+def compare_environments(pinn_model, params, predict_friction, num_episodes=100, max_steps=500):
     # Create environments with Monitor wrapper
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    pinn_model = pinn_model.to(device)
     original_env = Monitor(gym.make('CartPole-v1'))
-    pinn_env = Monitor(PINNCartPoleEnv(pinn_model, params))
+    pinn_env = Monitor(PINNCartPoleEnv(pinn_model, params, predict_friction))
 
     # Train a policy on the original environment
     print("Training PPO agent on original CartPole environment...")
-    ppo_model = PPO('MlpPolicy', original_env, verbose=1)
+    ppo_model = PPO('MlpPolicy', original_env, verbose=1, device=device)
     ppo_model.learn(total_timesteps=50000)
 
     # Evaluate on both environments
@@ -79,8 +81,10 @@ def compare_environments(pinn_model, params):
 if __name__ == "__main__":
     print("Comparing environments with preloaded trained model...")
     # Load your trained PINN model
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pinn_model = CartpolePINN(predict_friction=False)
-    pinn_model.load_state_dict(torch.load('trained_pinn_model.pth', weights_only=True))
+    pinn_model.load_state_dict(torch.load('trained_pinn_model.pth', weights_only=True, map_location=device))
+    pinn_model = pinn_model.to(device)
     pinn_model.eval()
 
     params = {
