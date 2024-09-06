@@ -1,5 +1,7 @@
 import torch
 
+import torch
+
 def pinn_loss(model, x, x_dot, theta, theta_dot, action, params, physics_weight=1.0):
     t = torch.zeros_like(x)
     
@@ -14,16 +16,22 @@ def pinn_loss(model, x, x_dot, theta, theta_dot, action, params, physics_weight=
     x_ddot = calculate_x_ddot(F, x_dot, theta, theta_dot, mu_c, mu_p, params)
 
     # Calculate losses
-    mse_loss = torch.mean((F - action)**2)
+    mse_loss = torch.nn.functional.mse_loss(F, action)
     physics_loss = torch.mean(
         (x_ddot - calculate_x_ddot(action, x_dot, theta, theta_dot, mu_c, mu_p, params))**2 +
         (theta_ddot - calculate_theta_ddot(action, x_dot, theta, theta_dot, mu_c, mu_p, params))**2
     )
     
-    total_loss = mse_loss + physics_weight * physics_loss
+    # Check for invalid values
+    if torch.isnan(mse_loss) or torch.isinf(mse_loss):
+        print(f"Warning: Invalid MSE loss value encountered: {mse_loss}")
+        mse_loss = torch.tensor(1e10, device=mse_loss.device)
     
-    if torch.isnan(total_loss):
-        raise ValueError("NaN encountered in loss computation")
+    if torch.isnan(physics_loss) or torch.isinf(physics_loss):
+        print(f"Warning: Invalid physics loss value encountered: {physics_loss}")
+        physics_loss = torch.tensor(1e10, device=physics_loss.device)
+    
+    total_loss = mse_loss + physics_weight * physics_loss
     
     return total_loss, mse_loss, physics_loss
 

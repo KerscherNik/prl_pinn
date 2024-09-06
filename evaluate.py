@@ -28,7 +28,7 @@ def evaluate_pinn(model, dataloader, params):
             predicted_actions.extend(F.cpu().numpy())
             states.extend(torch.stack([x, x_dot, theta, theta_dot], dim=1).cpu().numpy())
 
-            mse, phys = pinn_loss(model, x, x_dot, theta, theta_dot, action, params)
+            total_loss, mse, phys = pinn_loss(model, x, x_dot, theta, theta_dot, action, params)
             total_mse_loss += mse.item()
             total_physics_loss += phys.item()
 

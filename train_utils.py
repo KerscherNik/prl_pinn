@@ -1,6 +1,6 @@
 import torch
 from tqdm import tqdm
-from ray import tune
+from ray import tune, train
 from ray.tune import CLIReporter
 from ray.air import session
 from ray.tune.schedulers import ASHAScheduler
@@ -56,10 +56,8 @@ def objective(config, train_dataloader, test_dataloader, params, predict_frictio
     model.to(device)
     
     try:
-        final_train_loss = 0
         for epoch in range(config["num_epochs"]):
-            model, epoch_loss = train_pinn(model, train_dataloader, optimizer, pinn_loss, params, 1, config["physics_weight"])
-            final_train_loss = epoch_loss  # Store the last epoch's loss
+            train_loss = train_pinn(model, train_dataloader, optimizer, pinn_loss, params, 1, config["physics_weight"])
         
         # Evaluate on test set
         model.eval()
@@ -71,20 +69,17 @@ def objective(config, train_dataloader, test_dataloader, params, predict_frictio
                 test_loss += loss.item()
         avg_test_loss = test_loss / len(test_dataloader)
         
-        session.report({"train_loss": final_train_loss, "test_loss": avg_test_loss})
-    except RuntimeError as e:
-        if "out of memory" in str(e):
-            print("| WARNING: ran out of memory, skipping this trial")
-            session.report({"train_loss": float('inf'), "test_loss": float('inf')})
-        else:
-            raise e
+        session.report({"train_loss": train_loss, "test_loss": avg_test_loss})
+    except Exception as e:
+        print(f"Error during training: {str(e)}")
+        session.report({"train_loss": float('inf'), "test_loss": float('inf')})
     finally:
         torch.cuda.empty_cache()
 
 def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_friction):
     config = {
         "lr": tune.loguniform(1e-4, 1e-1),
-        "num_epochs": tune.choice([5]), # For simplicity, we only train for 5 epochs. Normaly 50, 100, 200 used here
+        "num_epochs": tune.choice([5]), # For simplicity, we only train for 5 epochs. Normaly [50, 100, 200] used here
         "physics_weight": tune.uniform(0.1, 10.0)
     }
 
