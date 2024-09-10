@@ -36,9 +36,30 @@ def evaluate_pinn(model, dataloader, params):
     predicted_actions = np.array(predicted_actions)
     states = np.array(states)
     
-    relative_error = np.abs(true_actions - predicted_actions) / np.abs(true_actions)
+    # Remove NaN values
+    mask = ~np.isnan(true_actions) & ~np.isnan(predicted_actions)
+    true_actions = true_actions[mask]
+    predicted_actions = predicted_actions[mask]
+    states = states[mask]
+    
+    if len(true_actions) == 0:
+        print("Warning: All values are NaN. Cannot calculate metrics.")
+        return float('inf'), float('inf'), float('inf'), float('inf'), float('inf')
+    
+    relative_error = np.abs(true_actions - predicted_actions) / (np.abs(true_actions) + 1e-8)
     mean_relative_error = np.mean(relative_error)
     print(f"Mean Relative Error: {mean_relative_error:.4f}")
+
+    # Calculate metrics
+    mse = mean_squared_error(true_actions, predicted_actions)
+    r2 = r2_score(true_actions, predicted_actions)
+    avg_mse_loss = total_mse_loss / len(dataloader)
+    avg_physics_loss = total_physics_loss / len(dataloader)
+
+    print(f"Mean Squared Error: {mse:.4f}")
+    print(f"R² Score: {r2:.4f}")
+    print(f"Average MSE Loss: {avg_mse_loss:.4f}")
+    print(f"Average Physics Loss: {avg_physics_loss:.4f}")
 
     # Add residual plot
     plt.figure(figsize=(10, 6))
@@ -48,12 +69,6 @@ def evaluate_pinn(model, dataloader, params):
     plt.title("Residual Plot")
     plt.savefig('residual_plot.png')
     plt.close()
-
-    # Calculate metrics
-    mse = mean_squared_error(true_actions, predicted_actions)
-    r2 = r2_score(true_actions, predicted_actions)
-    avg_mse_loss = total_mse_loss / len(dataloader)
-    avg_physics_loss = total_physics_loss / len(dataloader)
 
     print(f"Mean Squared Error: {mse:.4f}")
     print(f"R² Score: {r2:.4f}")
