@@ -67,7 +67,7 @@ The model is trained on real CartPole demonstration data with the following stru
 ## Usage
 
 1. Prepare your CartPole demonstration data in CSV format.
-2. Install the required dependencies from the requirements.txt file. We used python3.10 for our implementation. You may also want to install cuda ([Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) | [Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html)) and use the appropriate installation link for the[pytorch with cuda](https://pytorch.org/get-started/locally/) installation. We recommend using a virtual environment with conda or virtualenv, to manage dependencies.
+2. Install the required dependencies from the requirements.txt file. We used python3.10 for our implementation. You may also want to install cuda ([Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) | [Linux](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html)) and use the appropriate installation link for the [pytorch with cuda](https://pytorch.org/get-started/locally/) installation. We recommend using a virtual environment with conda or virtualenv, to manage dependencies.
 3. Run the main script:
 
    ```bash
