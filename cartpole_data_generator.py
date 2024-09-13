@@ -36,7 +36,6 @@ for episode in range(num_episodes):
 
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
 
-        #if not done:
         data.append([current_time, observation[0], observation[1], observation[2], observation[3], action])
 
         observation = next_observation
