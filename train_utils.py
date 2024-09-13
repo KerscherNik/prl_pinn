@@ -57,6 +57,8 @@ def remove_nan_inf(tensor):
     mask = torch.isfinite(tensor)
     return tensor[mask]
 
+# Defines the objective for Ray Tune's hyperparameter optimization
+# training loss and test loss
 def objective(config, train_dataloader, test_dataloader, params, predict_friction):
     model = CartpolePINN(predict_friction=predict_friction)
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
@@ -105,11 +107,13 @@ def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_
         reduction_factor=2
     )
 
+    # Command line reporter
     reporter = CLIReporter(
         parameter_columns=["lr", "num_epochs", "physics_weight"],
         metric_columns=["train_loss", "test_loss", "training_iteration"]
     )
 
+    # Tuning the hyperparameters
     result = tune.run(
         tune.with_parameters(
             objective, 

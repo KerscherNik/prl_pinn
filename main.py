@@ -7,6 +7,9 @@ from compare_environments import compare_environments
 
 import torch
 
+# Coordinates the whole process of model training and evaluation
+# (load and split data, define parameter, hyperparameter optimization,
+# model creation and training, model evaluation and comparison)
 def main():
     # TODO: Implement option to choose friction prediction or only force prediction or both can compare models performance
     
@@ -17,10 +20,10 @@ def main():
         "demonstration_data2024.csv"
     ]
 
-    # Load and split data
+    # Load and split the data into training and test sets
     train_dataloader, test_dataloader = get_dataloaders(file_paths, batch_size=32, test_size=0.2)
 
-    # Define parameters
+    # Define (physical) parameters for the Cartpole
     params = {
         "m_c": 0.466,
         "m_p": 0.06,
@@ -32,6 +35,7 @@ def main():
     }
 
     models = {}
+    # Predict only force or force and friction
     for predict_friction in [False]: # Currently only False for simplicity
         print(f"{'With' if predict_friction else 'Without'} friction prediction:")
         
@@ -42,8 +46,11 @@ def main():
         # Create and train model with best hyperparameters
         print("Training final model with best hyperparameters...")
         model = CartpolePINN(predict_friction=predict_friction)
+        # Choose ADAM optimizer
+        # (automatically adjusting learning rates based on the moments (i.e., mean and variance) of the gradients)
+        # pass the model parameters and set the learning rate to the best config found during hyperparams optimization
         optimizer = torch.optim.Adam(model.parameters(), lr=best_config["lr"])
-        
+
         trained_model, _ = train_pinn(model, train_dataloader, optimizer, pinn_loss, params, best_config["num_epochs"], best_config["physics_weight"])
         models[predict_friction] = trained_model
 

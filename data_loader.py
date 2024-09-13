@@ -3,6 +3,9 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 
+# Custom CartpoleDataset: Ensures the relevant columns,
+# enables loading data from multiple data sources at once,
+# split data in train and test data
 class CartpoleDataset(Dataset):
     def __init__(self, dataframe):
         self.data = dataframe[['cartPos', 'cartVel', 'pendPos', 'pendVel', 'action']].astype(float)
