@@ -7,6 +7,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
 from gym_integration import PINNCartPoleEnv
 from pinn_model import CartpolePINN
+from visualization import create_animation, plot_trajectory
 
 # evaluate policy on given environment by mean and standard deviation of the rewards
 def evaluate_env(env, model, num_episodes=100):
@@ -15,29 +16,36 @@ def evaluate_env(env, model, num_episodes=100):
 
 # Collects trajectories (states, actions, rewards) of the policy in a given environment
 # Runs the env for max_steps, predicts next actions and returns the states, actions and rewards
-def collect_trajectory(env, model, max_steps=500):
+def collect_trajectory(env, model, max_steps=500, visualize=False):
     obs, _ = env.reset()  # Unpack both observation and info, discard info
     states, actions, rewards = [], [], []
+
+    animation = create_animation(obs, max_steps, visualize)
+
     for _ in range(max_steps):
         action, _ = model.predict(obs, deterministic=True)
         states.append(obs)
         actions.append(action)
         obs, reward, terminated, truncated, _ = env.step(action)
         rewards.append(reward)
+
+        plot_trajectory(states, actions, rewards, visualize)
+
         if terminated or truncated:
             break
+
     return np.array(states), np.array(actions), np.array(rewards)
 
 
 # Compares performance of policy in original CartPole env and in PINN-based env
 # Trains a policy on gym env to compare performance of this policy on gym and pinn env
 # and collects trajectories for that
-def compare_environments(pinn_model, params, predict_friction, num_episodes=100, max_steps=500):
+def compare_environments(pinn_model, params, predict_friction=False, num_episodes=100, max_steps=500, visualize=False):
     # Create environments with Monitor wrapper
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pinn_model = pinn_model.to(device)
     original_env = Monitor(gym.make('CartPole-v1'))
-    pinn_env = Monitor(PINNCartPoleEnv(pinn_model, params, predict_friction))
+    pinn_env = Monitor(PINNCartPoleEnv(pinn_model, params))
 
     # Train a policy on the original environment (MLP policy and verbose=1 to enable logging of training progress
     print("Training PPO agent on original CartPole environment...")
@@ -54,8 +62,8 @@ def compare_environments(pinn_model, params, predict_friction, num_episodes=100,
     print(f"Mean reward: {pinn_mean:.2f} +/- {pinn_std:.2f}")
 
     # Collect trajectories
-    original_states, original_actions, original_rewards = collect_trajectory(original_env, ppo_model)
-    pinn_states, pinn_actions, pinn_rewards = collect_trajectory(pinn_env, ppo_model)
+    original_states, original_actions, original_rewards = collect_trajectory(original_env, ppo_model, visualize=visualize)
+    pinn_states, pinn_actions, pinn_rewards = collect_trajectory(pinn_env, ppo_model, visualize)
 
     # Plot state comparisons
     fig, axs = plt.subplots(2, 2, figsize=(15, 10))
@@ -89,7 +97,7 @@ if __name__ == "__main__":
     # Load your trained PINN model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pinn_model = CartpolePINN(predict_friction=False)
-    pinn_model.load_state_dict(torch.load('trained_pinn_model.pth', weights_only=True, map_location=device))
+    pinn_model.load_state_dict(torch.load('model_archive/270824_pinnModel.pth', weights_only=True, map_location=device))
     pinn_model = pinn_model.to(device)
     pinn_model.eval()
 
@@ -103,4 +111,4 @@ if __name__ == "__main__":
         "force_mag": 10.0
     }
 
-    compare_environments(pinn_model, params)
+    compare_environments(pinn_model, params, visualize=True)

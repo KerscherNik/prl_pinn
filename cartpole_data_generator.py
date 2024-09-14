@@ -2,21 +2,22 @@ import gymnasium as gym
 import pandas as pd
 import numpy as np
 from datetime import datetime
+# import gym_cartpole_swingup
 
+# env = gym.make('CartPoleSwingUp-v0')
 env = gym.make('CartPole-v1')
 data = []
 
-num_episodes = 5000
+num_episodes = 5
 
 for episode in range(num_episodes):
     # reset environment to start new episode
     observation, info = env.reset()
 
-    # random init state
     new_init_state = np.array([
         np.random.random() * 2 - 1,  # cartPos
         np.random.random() * 12 - 6,  # cartVel
-        np.random.random() * 2 * np.pi,  # pendPos
+        np.random.random() * 2 * np.pi,  # terminates if angle not in range (-.2095, .2095) (or ±12°)
         np.random.random() * 40 - 20  # pendVel
     ]).astype(np.float32)
 
