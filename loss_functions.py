@@ -1,7 +1,6 @@
 import torch
 
-import torch
-
+# Computes a loss as a combination of mse and physics loss
 def pinn_loss(model, x, x_dot, theta, theta_dot, action, params, physics_weight=1.0):
     t = torch.zeros_like(x)
     
