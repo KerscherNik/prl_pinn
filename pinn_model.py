@@ -1,10 +1,13 @@
 import torch
 import torch.nn as nn
 
+# init weights using Xavier uniform initialization,
+# (commonly used to ensure that the initial weights are not too large or too small)
 def init_weights(m):
     if isinstance(m, nn.Linear):
         torch.nn.init.xavier_uniform_(m.weight)
         m.bias.data.fill_(0.01)
+
 
 class CartpolePINN(nn.Module):
     def __init__(self, predict_friction=False):

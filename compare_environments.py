@@ -8,10 +8,13 @@ from stable_baselines3.common.monitor import Monitor
 from gym_integration import PINNCartPoleEnv
 from pinn_model import CartpolePINN
 
+# evaluate policy on given environment by mean and standard deviation of the rewards
 def evaluate_env(env, model, num_episodes=100):
     mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=num_episodes)
     return mean_reward, std_reward
 
+# Collects trajectories (states, actions, rewards) of the policy in a given environment
+# Runs the env for max_steps, predicts next actions and returns the states, actions and rewards
 def collect_trajectory(env, model, max_steps=500):
     obs, _ = env.reset()  # Unpack both observation and info, discard info
     states, actions, rewards = [], [], []
@@ -26,6 +29,9 @@ def collect_trajectory(env, model, max_steps=500):
     return np.array(states), np.array(actions), np.array(rewards)
 
 
+# Compares performance of policy in original CartPole env and in PINN-based env
+# Trains a policy on gym env to compare performance of this policy on gym and pinn env
+# and collects trajectories for that
 def compare_environments(pinn_model, params, predict_friction, num_episodes=100, max_steps=500):
     # Create environments with Monitor wrapper
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -33,7 +39,7 @@ def compare_environments(pinn_model, params, predict_friction, num_episodes=100,
     original_env = Monitor(gym.make('CartPole-v1'))
     pinn_env = Monitor(PINNCartPoleEnv(pinn_model, params, predict_friction))
 
-    # Train a policy on the original environment
+    # Train a policy on the original environment (MLP policy and verbose=1 to enable logging of training progress
     print("Training PPO agent on original CartPole environment...")
     ppo_model = PPO('MlpPolicy', original_env, verbose=1, device=device)
     ppo_model.learn(total_timesteps=50000)

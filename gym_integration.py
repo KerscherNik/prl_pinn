@@ -17,17 +17,20 @@ class PINNCartPoleEnv(gym.Env):
         self.force_mag = params['force_mag']
         self.tau = 0.02  # seconds between state updates
 
-        # Angle at which to fail the episode
+        # Angle at which to fail the episode # TODO: Why 12? Gpt says it does make sense...
         self.theta_threshold_radians = 12 * 2 * np.pi / 360
         self.x_threshold = 2.4
 
+        # Define threshold for cart position, cart velocity, pole angle, pole angular velocity
         high = np.array([
             self.x_threshold * 2,
             np.finfo(np.float32).max,
             self.theta_threshold_radians * 2,
             np.finfo(np.float32).max])
 
+        # 2 discrete actions (push left or right)
         self.action_space = gym.spaces.Discrete(2)
+        # observation space, the environment can return
         self.observation_space = gym.spaces.Box(-high, high, dtype=np.float32)
 
         self.seed()
@@ -43,7 +46,7 @@ class PINNCartPoleEnv(gym.Env):
         state = self.state
         x, x_dot, theta, theta_dot = state
 
-        # Get force from PINN
+        # Get/Predict force from PINN
         with torch.no_grad():
             t = torch.zeros(1)
             force = self.pinn_model(t, torch.tensor([x]), torch.tensor([x_dot]), 
@@ -65,6 +68,7 @@ class PINNCartPoleEnv(gym.Env):
 
         self.state = (x, x_dot, theta, theta_dot)
 
+        # Check for the thresholds
         done =  x < -self.x_threshold \
                 or x > self.x_threshold \
                 or theta < -self.theta_threshold_radians \
