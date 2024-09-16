@@ -4,7 +4,7 @@ from model.loss_functions import pinn_loss
 from training.train_utils import train_pinn, optimize_hyperparameters
 from evaluation.evaluate import evaluate_pinn
 from integration.compare_environments import compare_environments
-
+import datetime
 import torch
 
 # Coordinates the whole process of model training and evaluation
@@ -59,7 +59,8 @@ def main():
         models[predict_friction] = trained_model
         
         # Save the trained model
-        torch.save(trained_model.state_dict(), f'model_archive/trained_pinn_model_{"with" if predict_friction else "without"}_friction.pth')
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        torch.save(trained_model.state_dict(), f'model_archive/trained_pinn_model_{"with" if predict_friction else "without"}_friction_{timestamp}.pth')
         
         # Evaluate model
         print("Evaluating model...")
