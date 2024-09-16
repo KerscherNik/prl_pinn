@@ -53,13 +53,13 @@ def main():
 
         trained_model, _ = train_pinn(model, train_dataloader, optimizer, pinn_loss, params, best_config["num_epochs"], best_config["physics_weight"])
         models[predict_friction] = trained_model
-
+        
+        # Save the trained model
+        torch.save(trained_model.state_dict(), f'model_archive/trained_pinn_model_{"with" if predict_friction else "without"}_friction.pth')
+        
         # Evaluate model
         print("Evaluating model...")
         mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(trained_model, test_dataloader, params)
-
-        # Save the trained model
-        torch.save(trained_model.state_dict(), f'trained_pinn_model_{"with" if predict_friction else "without"}_friction.pth')
 
         print(f"Results for {'with' if predict_friction else 'without'} friction prediction:")
         print(f"MSE: {mse:.4f}")
@@ -71,11 +71,19 @@ def main():
 
     # Compare environments
     print("Comparing CartPole environments...")
-    rewards_orig, rewards_pinn_with_friction = compare_environments(models[True], params)
-    rewards_orig, rewards_pinn_without_friction = compare_environments(models[False], params)
+    #rewards_orig, rewards_pinn_with_friction = compare_environments(models[True], params, True)
+    #rewards_orig, rewards_pinn_without_friction = compare_environments(models[False], params, False)
+    
+    # Load the trained model
+    trained_model = CartpolePINN(predict_friction=False)
+    trained_model.load_state_dict(torch.load('model_archive/270824_pinnModel.pth'))
+
+    # Compare environments
+    print("Comparing CartPole environments...")
+    rewards_orig, rewards_pinn_without_friction = compare_environments(trained_model, params, False)
 
     print("Average reward (Original): {:.2f}".format(sum(rewards_orig) / len(rewards_orig)))
-    print("Average reward (PINN with friction): {:.2f}".format(sum(rewards_pinn_with_friction) / len(rewards_pinn_with_friction)))
+    #print("Average reward (PINN with friction): {:.2f}".format(sum(rewards_pinn_with_friction) / len(rewards_pinn_with_friction)))
     print("Average reward (PINN without friction): {:.2f}".format(sum(rewards_pinn_without_friction) / len(rewards_pinn_without_friction)))
 
     print("Done!")

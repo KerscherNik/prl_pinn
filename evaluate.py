@@ -110,4 +110,4 @@ def evaluate_pinn(model, dataloader, params):
     plt.savefig('actions_vs_states.png')
     plt.close()
 
-    return mse, r2, avg_mse_loss, avg_physics_loss
+    return mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error
