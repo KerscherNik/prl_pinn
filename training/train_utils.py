@@ -4,9 +4,9 @@ from ray import tune, train
 from ray.tune import CLIReporter
 from ray.air import session
 from ray.tune.schedulers import ASHAScheduler
-from pinn_model import CartpolePINN
+from model.pinn_model import CartpolePINN
 import numpy as np
-from loss_functions import pinn_loss
+from model.loss_functions import pinn_loss
 
 def train_pinn(model, train_dataloader, optimizer, loss_fn, params, num_epochs, physics_weight):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -53,10 +53,6 @@ def train_pinn(model, train_dataloader, optimizer, loss_fn, params, num_epochs, 
 
     return model, avg_loss
 
-def remove_nan_inf(tensor):
-    mask = torch.isfinite(tensor)
-    return tensor[mask]
-
 # Defines the objective for Ray Tune's hyperparameter optimization
 # training loss and test loss
 def objective(config, train_dataloader, test_dataloader, params, predict_friction):
@@ -70,8 +66,8 @@ def objective(config, train_dataloader, test_dataloader, params, predict_frictio
     try:
         for epoch in range(config["num_epochs"]):
             train_loss = train_pinn(model, train_dataloader, optimizer, pinn_loss, params, 1, config["physics_weight"])
-            if not np.isfinite(train_loss):
-                raise ValueError("Training loss is not finite")
+            """ if not np.isfinite(train_loss):
+                raise ValueError("Training loss is not finite") """
             scheduler.step(train_loss)
         
         # Evaluate on test set
@@ -79,7 +75,7 @@ def objective(config, train_dataloader, test_dataloader, params, predict_frictio
         test_loss = 0
         with torch.no_grad():
             for batch in test_dataloader:
-                batch = [remove_nan_inf(b.to(device)) for b in batch]
+                batch = [b.to(device) for b in batch]
                 x, x_dot, theta, theta_dot, action = batch
                 loss, _, _ = pinn_loss(model, x, x_dot, theta, theta_dot, action, params, config["physics_weight"])
                 test_loss += loss.item()

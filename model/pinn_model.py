@@ -1,13 +1,10 @@
 import torch
 import torch.nn as nn
 
-# init weights using Xavier uniform initialization,
-# (commonly used to ensure that the initial weights are not too large or too small)
 def init_weights(m):
     if isinstance(m, nn.Linear):
         torch.nn.init.xavier_uniform_(m.weight)
         m.bias.data.fill_(0.01)
-
 
 class CartpolePINN(nn.Module):
     def __init__(self, predict_friction=False):
@@ -26,10 +23,10 @@ class CartpolePINN(nn.Module):
         )
         
         self.network.apply(init_weights)
+        self.to(torch.float32)  # Ensure all parameters are float32
 
     def forward(self, t, x, x_dot, theta, theta_dot):
-        device = next(self.parameters()).device
-        inputs = torch.stack([t, x, x_dot, theta, theta_dot], dim=1).to(device)
+        inputs = torch.stack([t, x, x_dot, theta, theta_dot], dim=1).to(self.device, dtype=torch.float32)
         outputs = self.network(inputs)
         
         if self.predict_friction:
@@ -37,3 +34,7 @@ class CartpolePINN(nn.Module):
             return F, mu_c, mu_p
         else:
             return outputs.squeeze()
+
+    @property
+    def device(self):
+        return next(self.parameters()).device

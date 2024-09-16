@@ -1,9 +1,9 @@
-from data_loader import get_dataloaders
-from pinn_model import CartpolePINN
-from loss_functions import pinn_loss
-from train_utils import train_pinn, optimize_hyperparameters
-from evaluate import evaluate_pinn
-from compare_environments import compare_environments
+from data.data_loader import get_dataloaders
+from model.pinn_model import CartpolePINN
+from model.loss_functions import pinn_loss
+from training.train_utils import train_pinn, optimize_hyperparameters
+from evaluation.evaluate import evaluate_pinn
+from integration.compare_environments import compare_environments
 
 import torch
 
@@ -14,10 +14,14 @@ def main():
     # TODO: Implement option to choose friction prediction or only force prediction or both can compare models performance
     
     # Define file paths
+    """ "data/demonstration_data2018_1.csv",
+        "data/demonstration_data2018_2.csv",
+        "data/demonstration_data2024.csv" """
     file_paths = [
-        "demonstration_data2018_1.csv",
-        "demonstration_data2018_2.csv",
-        "demonstration_data2024.csv"
+        "data/cartpole_data.csv",
+        "data/demonstration_data2018_1.csv",
+        "data/demonstration_data2018_2.csv",
+        "data/demonstration_data2024.csv"
     ]
 
     # Load and split the data into training and test sets
