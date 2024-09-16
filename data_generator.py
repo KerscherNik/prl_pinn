@@ -2,9 +2,7 @@ import gymnasium as gym
 import pandas as pd
 import numpy as np
 from datetime import datetime
-# import gym_cartpole_swingup
 
-# env = gym.make('CartPoleSwingUp-v0')
 env = gym.make('CartPole-v1')
 data = []
 
@@ -21,7 +19,7 @@ for episode in range(num_episodes):
         np.random.random() * 40 - 20  # pendVel
     ]).astype(np.float32)
 
-    env.env.state = new_init_state
+    env.state = new_init_state
 
     # set observation to new random init state manually
     observation = new_init_state

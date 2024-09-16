@@ -80,4 +80,5 @@ def visualize_csv_data(file_path):
 
 # Example usage for visualization from CSV file
 if __name__ == "__main__":
-    visualize_csv_data('cartpole_data.csv')
+    # visualize_csv_data('cartpole_data.csv')
+    visualize_csv_data('cartpole_swingup_data.csv')
