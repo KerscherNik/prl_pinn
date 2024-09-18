@@ -33,6 +33,8 @@ class PINNCartPoleEnv(gym.Env):
 
         self.state = None
         self.steps_beyond_done = None
+        self.sequence_length = self.pinn_model.sequence_length
+        self.sequence_buffer = None
 
     def step(self, action):
         err_msg = f"{action!r} ({type(action)}) invalid"
@@ -40,29 +42,31 @@ class PINNCartPoleEnv(gym.Env):
 
         x, x_dot, theta, theta_dot = self.state
 
-        # Convert state to float32 tensors
-        t = torch.tensor([0.0], dtype=torch.float32, device=self.pinn_model.device)
-        x = torch.tensor([x], dtype=torch.float32, device=self.pinn_model.device)
-        x_dot = torch.tensor([x_dot], dtype=torch.float32, device=self.pinn_model.device)
-        theta = torch.tensor([theta], dtype=torch.float32, device=self.pinn_model.device)
-        theta_dot = torch.tensor([theta_dot], dtype=torch.float32, device=self.pinn_model.device)
+        # Update sequence buffer
+        new_state = torch.tensor([x, x_dot, theta, theta_dot, float(action)], 
+                                 dtype=torch.float32, 
+                                 device=self.pinn_model.device).unsqueeze(0).unsqueeze(0)
+        if self.sequence_buffer is None:
+            self.sequence_buffer = new_state.repeat(1, self.sequence_length, 1)
+        else:
+            self.sequence_buffer = torch.cat([self.sequence_buffer[:, 1:, :], new_state], dim=1)
 
-        # Get/Predict force from PINN
+        # Get force from PINN
         with torch.no_grad():
-            force = self.pinn_model(t, x, x_dot, theta, theta_dot)
-            force = force.item() * self.force_mag
+            force = self.pinn_model(self.sequence_buffer)
+            force = force.item() * self.params['force_mag']
 
-        costheta = np.cos(theta.item())
-        sintheta = np.sin(theta.item())
+        costheta = np.cos(theta)
+        sintheta = np.sin(theta)
 
-        temp = (force + self.polemass_length * theta_dot.item() ** 2 * sintheta) / self.total_mass
+        temp = (force + self.polemass_length * theta_dot ** 2 * sintheta) / self.total_mass
         thetaacc = (self.gravity * sintheta - costheta * temp) / (self.length * (4.0/3.0 - self.masspole * costheta ** 2 / self.total_mass))
         xacc = temp - self.polemass_length * thetaacc * costheta / self.total_mass
 
-        x = x.item() + self.tau * x_dot.item()
-        x_dot = x_dot.item() + self.tau * xacc
-        theta = theta.item() + self.tau * theta_dot.item()
-        theta_dot = theta_dot.item() + self.tau * thetaacc
+        x = x + self.tau * x_dot
+        x_dot = x_dot + self.tau * xacc
+        theta = theta + self.tau * theta_dot
+        theta_dot = theta_dot + self.tau * thetaacc
 
         self.state = (x, x_dot, theta, theta_dot)
 
@@ -96,4 +100,5 @@ class PINNCartPoleEnv(gym.Env):
         super().reset(seed=seed)
         self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,))
         self.steps_beyond_done = None
+        self.sequence_buffer = None
         return np.array(self.state, dtype=np.float32), {}

@@ -128,7 +128,7 @@ def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_
         parameter_columns=["lr", "num_epochs", "physics_weight"],
         metric_columns=["train_loss", "test_loss", "training_iteration"]
     )
-
+    # TODO: Uncomment this block to run hyperparameter optimization
     """ result = tune.run(
         tune.with_parameters(
             objective, 

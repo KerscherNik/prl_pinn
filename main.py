@@ -63,13 +63,12 @@ def main():
         print("\n" + "="*50 + "\n")
 
     # Compare environments
-    print("Comparing CartPole environments...")
     #rewards_orig, rewards_pinn_with_friction = compare_environments(models[True], params, True)
     #rewards_orig, rewards_pinn_without_friction = compare_environments(models[False], params, False)
     
-    # Load the trained model
-    trained_model = CartpolePINN(predict_friction=False)
-    trained_model.load_state_dict(torch.load('model_archive/270824_pinnModel.pth'))
+    """ # Load the trained model
+    trained_model = CartpolePINN(predict_friction=False, sequence_length=sequence_length)
+    trained_model.load_state_dict(torch.load('model_archive/trained_pinn_model_without_friction_20240918_022442.pth')) """
 
     # Compare environments
     print("Comparing CartPole environments...")
