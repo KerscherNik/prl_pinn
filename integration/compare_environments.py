@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 from stable_baselines3 import PPO
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
-from gym_integration import PINNCartPoleEnv
-from pinn_model import CartpolePINN
-from visualization import create_animation, plot_trajectory
+from integration.gym_integration import PINNCartPoleEnv
+from model.pinn_model import CartpolePINN
+from visualization.visualization import create_animation, plot_trajectory
 
 # evaluate policy on given environment by mean and standard deviation of the rewards
 def evaluate_env(env, model, num_episodes=100):
@@ -50,7 +50,7 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     # Train a policy on the original environment (MLP policy and verbose=1 to enable logging of training progress
     print("Training PPO agent on original CartPole environment...")
     ppo_model = PPO('MlpPolicy', original_env, verbose=1, device=device)
-    ppo_model.learn(total_timesteps=50000)
+    ppo_model.learn(total_timesteps=50)
 
     # Evaluate on both environments
     print("Evaluating on original environment:")
@@ -70,11 +70,12 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     state_labels = ['Cart Position', 'Cart Velocity', 'Pole Angle', 'Pole Angular Velocity']
     for i in range(4):
         axs[i // 2, i % 2].plot(original_states[:, i], label='Original')
-        axs[i // 2, i % 2].plot(pinn_states[:, i], label='PINN')
+        if pinn_states.ndim > 1 and pinn_states.shape[0] > 1:
+            axs[i // 2, i % 2].plot(pinn_states[:, i], label='PINN')
         axs[i // 2, i % 2].set_title(state_labels[i])
         axs[i // 2, i % 2].legend()
     plt.tight_layout()
-    plt.savefig('state_comparison.png')
+    plt.savefig('media/state_comparison.png')
     plt.close()
 
     # Plot reward comparison
@@ -85,7 +86,7 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     plt.xlabel('Time Step')
     plt.ylabel('Cumulative Reward')
     plt.legend()
-    plt.savefig('reward_comparison.png')
+    plt.savefig('media/reward_comparison.png')
     plt.close()
 
     # Close environments
@@ -97,7 +98,7 @@ if __name__ == "__main__":
     # Load your trained PINN model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pinn_model = CartpolePINN(predict_friction=False)
-    pinn_model.load_state_dict(torch.load('model_archive/270824_pinnModel.pth', weights_only=True, map_location=device))
+    pinn_model.load_state_dict(torch.load('../model_archive/270824_pinnModel.pth', weights_only=True, map_location=device))
     pinn_model = pinn_model.to(device)
     pinn_model.eval()
 

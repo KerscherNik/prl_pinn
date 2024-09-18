@@ -1,65 +1,58 @@
-from data_loader import get_dataloaders
-from pinn_model import CartpolePINN
-from loss_functions import pinn_loss
-from train_utils import train_pinn, optimize_hyperparameters
-from evaluate import evaluate_pinn
-from compare_environments import compare_environments
-
+from data.data_loader import get_dataloaders
+from model.pinn_model import CartpolePINN
+from training.train_utils import train_pinn, optimize_hyperparameters
+from evaluation.evaluate import evaluate_pinn
+from integration.compare_environments import compare_environments
+import datetime
 import torch
 
-# Coordinates the whole process of model training and evaluation
-# (load and split data, define parameter, hyperparameter optimization,
-# model creation and training, model evaluation and comparison)
 def main():
-    # TODO: Implement option to choose friction prediction or only force prediction or both can compare models performance
-    
-    # Define file paths
-    file_paths = [
-        "demonstration_data2018_1.csv",
-        "demonstration_data2018_2.csv",
-        "demonstration_data2024.csv"
-    ]
+    file_paths = ["data/cartpole_data.csv"]
+    sequence_length = 5  # Adjust this value as needed
 
-    # Load and split the data into training and test sets
-    train_dataloader, test_dataloader = get_dataloaders(file_paths, batch_size=32, test_size=0.2)
+    # Load and preprocess the data
+    train_dataloader, test_dataloader, scaler = get_dataloaders(file_paths, batch_size=32, sequence_length=sequence_length, test_size=0.2)
 
-    # Define (physical) parameters for the Cartpole
     params = {
         "m_c": 0.466,
         "m_p": 0.06,
         "l": 0.201,
         "g": 9.81,
-        "mu_c": 0.1,  # Example value, adjust as needed
-        "mu_p": 0.01,  # Example value, adjust as needed
-        "force_mag": 10.0  # Add this parameter for the PINN environment
+        "mu_c": 0.1,
+        "mu_p": 0.01,
+        "force_mag": 10.0
     }
 
     models = {}
-    # Predict only force or force and friction
-    for predict_friction in [False]: # Currently only False for simplicity
+    for predict_friction in [False]:
         print(f"{'With' if predict_friction else 'Without'} friction prediction:")
         
         # Hyperparameter optimization
         print("Starting hyperparameter optimization...")
-        best_config = optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_friction)
+        best_config = optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_friction, sequence_length)
+        print("Best hyperparameters found:", best_config)        
 
         # Create and train model with best hyperparameters
         print("Training final model with best hyperparameters...")
-        model = CartpolePINN(predict_friction=predict_friction)
-        # Choose ADAM optimizer
-        # (automatically adjusting learning rates based on the moments (i.e., mean and variance) of the gradients)
-        # pass the model parameters and set the learning rate to the best config found during hyperparams optimization
+        model = CartpolePINN(sequence_length, predict_friction=predict_friction)
         optimizer = torch.optim.Adam(model.parameters(), lr=best_config["lr"])
 
-        trained_model, _ = train_pinn(model, train_dataloader, optimizer, pinn_loss, params, best_config["num_epochs"], best_config["physics_weight"])
+        trained_model, _ = train_pinn(model, train_dataloader, optimizer, params, best_config["num_epochs"], best_config["physics_weight"])
         models[predict_friction] = trained_model
         
         # Save the trained model
-        torch.save(trained_model.state_dict(), f'model_archive/trained_pinn_model_{"with" if predict_friction else "without"}_friction.pth')
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        torch.save(trained_model.state_dict(), f'model_archive/trained_pinn_model_{"with" if predict_friction else "without"}_friction_{timestamp}.pth')
+        
+        # Uncomment this block to load a saved model and evaluate it directly. Make sure to comment out previous training block and hyperparameter optimization block. At evaluate_pinn use the loaded model instead of trained_model.
+        """ # Load the already saved model
+        saved_model_path = f'model_archive/trained_pinn_model_without_friction_20240918_022442.pth'
+        loaded_model = CartpolePINN(sequence_length, predict_friction=predict_friction)
+        loaded_model.load_state_dict(torch.load(saved_model_path)) """
         
         # Evaluate model
         print("Evaluating model...")
-        mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(trained_model, test_dataloader, params)
+        mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(trained_model, test_dataloader, params, scaler)
 
         print(f"Results for {'with' if predict_friction else 'without'} friction prediction:")
         print(f"MSE: {mse:.4f}")

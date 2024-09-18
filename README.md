@@ -6,7 +6,7 @@ This project implements a Physics-Informed Neural Network (PINN) to simulate the
 
 The CartPole system consists of a pendulum attached to a cart moving along a frictionless track. Our PINN approach aims to accurately model this system by learning from both demonstration data and the underlying physical laws.
 
-![CartPole System](cart_pole.gif)
+![CartPole System](media/cart_pole.gif)
 
 *GIF Source: [Gymnasium Documentation](https://gymnasium.farama.org/environments/classic_control/cart_pole/#cart-pole)*
 

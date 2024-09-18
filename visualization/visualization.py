@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
 import pandas as pd
+
 def create_animation(obs, max_steps, visualize):
     if not visualize:
         return None
@@ -80,5 +81,5 @@ def visualize_csv_data(file_path):
 
 # Example usage for visualization from CSV file
 if __name__ == "__main__":
-    # visualize_csv_data('cartpole_data.csv')
-    visualize_csv_data('cartpole_swingup_data.csv')
+    # visualize_csv_data('../data/cartpole_data.csv')
+    visualize_csv_data('../data/cartpole_swingup_data.csv')
