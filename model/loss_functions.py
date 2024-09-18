@@ -1,49 +1,43 @@
 import torch
+from model.physics_helpers import calculate_theta_ddot, calculate_x_ddot
 
-# Computes a loss as a combination of mse and physics loss
-def pinn_loss(model, x, x_dot, theta, theta_dot, action, params, physics_weight=1.0):
-    t = torch.zeros_like(x)
+def pinn_loss(model, sequences, targets, params, physics_weight=1.0, t_span=1.0, simulation_callback=None, loss_calculation_callback=None):
+    batch_size = sequences.shape[0]
+    device = sequences.device
     
-    if model.predict_friction:
-        F, mu_c, mu_p = model(t, x, x_dot, theta, theta_dot)
-    else:
-        F = model(t, x, x_dot, theta, theta_dot)
-        mu_c, mu_p = params['mu_c'], params['mu_p']
+    F = model(sequences)
+    mu_c, mu_p = params['mu_c'], params['mu_p']
 
-    # Calculate derivatives
-    theta_ddot = calculate_theta_ddot(F, x_dot, theta, theta_dot, mu_c, mu_p, params)
-    x_ddot = calculate_x_ddot(F, x_dot, theta, theta_dot, mu_c, mu_p, params)
+    total_mse_loss = 0
+    total_physics_loss = 0
 
-    # Calculate losses
-    mse_loss = torch.nn.functional.mse_loss(F, action)
-    physics_loss = torch.mean(
-        (x_ddot - calculate_x_ddot(action, x_dot, theta, theta_dot, mu_c, mu_p, params))**2 +
-        (theta_ddot - calculate_theta_ddot(action, x_dot, theta, theta_dot, mu_c, mu_p, params))**2
-    )
-    
-    # Check for invalid values
-    if torch.isnan(mse_loss) or torch.isinf(mse_loss):
-        mse_loss = torch.tensor(1e6, device=mse_loss.device)
-    
-    if torch.isnan(physics_loss) or torch.isinf(physics_loss):
-        physics_loss = torch.tensor(1e6, device=physics_loss.device)
-    
-    total_loss = mse_loss + physics_weight * physics_loss
-    
-    return total_loss, mse_loss, physics_loss
+    for i in range(batch_size):
+        initial_state = sequences[i, -1, :4]  # Use the last state in the sequence
+        target = targets[i]
+        
+        trajectory = model.simulate(t_span, initial_state, params, callback=simulation_callback)
+        
+        # MSE loss between predicted force and target force
+        mse_loss = torch.nn.functional.mse_loss(F[i], target[-1])  # Compare with the last action in the target
+        
+        # Physics loss
+        physics_loss = 0
+        for j, state in enumerate(trajectory):
+            x, x_dot, theta, theta_dot = state
+            x_ddot = calculate_x_ddot(F[i], x_dot, theta, theta_dot, mu_c, mu_p, params)
+            theta_ddot = calculate_theta_ddot(F[i], x_dot, theta, theta_dot, mu_c, mu_p, params)
+            
+            physics_loss += (x_ddot - calculate_x_ddot(target[-1], x_dot, theta, theta_dot, mu_c, mu_p, params))**2
+            physics_loss += (theta_ddot - calculate_theta_ddot(target[-1], x_dot, theta, theta_dot, mu_c, mu_p, params))**2
+            
+            if loss_calculation_callback:
+                loss_calculation_callback((i * len(trajectory) + j + 1) / (batch_size * len(trajectory)))
+        
+        total_mse_loss += mse_loss
+        total_physics_loss += physics_loss / len(trajectory)
 
-def calculate_theta_ddot(F, x_dot, theta, theta_dot, mu_c, mu_p, params):
-    m_c, m_p, l, g = params['m_c'], params['m_p'], params['l'], params['g']
-    
-    numerator = g * torch.sin(theta) + torch.cos(theta) * (
-        -F - m_p * l * theta_dot**2 * torch.sin(theta) + mu_c * torch.sign(x_dot)
-    ) / (m_c + m_p) - (mu_p * theta_dot) / (m_p * l)
-    
-    denominator = l * (4/3 - (m_p * torch.cos(theta)**2) / (m_c + m_p) + 1e-8)
-    
-    return numerator / denominator
+    avg_mse_loss = total_mse_loss / batch_size
+    avg_physics_loss = total_physics_loss / batch_size
+    total_loss = avg_mse_loss + physics_weight * avg_physics_loss
 
-def calculate_x_ddot(F, x_dot, theta, theta_dot, mu_c, mu_p, params):
-    m_c, m_p, l = params['m_c'], params['m_p'], params['l']
-    
-    return (F + m_p * l * (theta_dot**2 * torch.sin(theta) - calculate_theta_ddot(F, x_dot, theta, theta_dot, mu_c, mu_p, params) * torch.cos(theta)) - mu_c * torch.sign(x_dot)) / (m_c + m_p + 1e-8)
+    return total_loss, avg_mse_loss, avg_physics_loss

@@ -6,7 +6,7 @@ from datetime import datetime
 env = gym.make('CartPole-v1')
 data = []
 
-num_episodes = 5
+num_episodes = 1000
 
 for episode in range(num_episodes):
     # reset environment to start new episode
@@ -40,6 +40,6 @@ for episode in range(num_episodes):
         observation = next_observation
 
 df = pd.DataFrame(data, columns=['datetime', 'cartPos', 'cartVel', 'pendPos', 'pendVel', 'action'])
-df.to_csv('cartpole_data.csv', index=False, sep=';')
+df.to_csv('data/cartpole_data.csv', index=False, sep=';')
 
 print("Data saved in 'cartpole_data.csv'.")
