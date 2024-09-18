@@ -1,6 +1,5 @@
 from data.data_loader import get_dataloaders
 from model.pinn_model import CartpolePINN
-from model.loss_functions import pinn_loss
 from training.train_utils import train_pinn, optimize_hyperparameters
 from evaluation.evaluate import evaluate_pinn
 from integration.compare_environments import compare_environments
