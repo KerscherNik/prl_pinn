@@ -82,7 +82,7 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     # Train a policy on the original environment
     print("Training PPO agent on original CartPole environment...")
     ppo_model = PPO('MlpPolicy', original_env, verbose=1, device=device)
-    ppo_model.learn(total_timesteps=5) # TODO: Adjust total_timesteps as needed
+    ppo_model.learn(total_timesteps=50000) # TODO: Adjust total_timesteps as needed
 
     # Evaluate on both environments
     print("Evaluating on original environment:")
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pinn_model = CartpolePINN(predict_friction=False, sequence_length=10)  # Adjust sequence_length as needed
     try:
-        pinn_model.load_state_dict(torch.load('../model_archive/270824_pinnModel.pth', map_location=device))
+        pinn_model.load_state_dict(torch.load('../model_archive/trained_pinn_model_without_friction_20240919_092248.pth', map_location=device))
     except Exception as e:
         print(f"Error loading model: {e}")
         print("Proceeding with untrained model.")
