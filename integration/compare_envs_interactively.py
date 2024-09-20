@@ -11,7 +11,7 @@ from integration.gym_integration import PINNCartPoleEnv
 from model.pinn_model import CartpolePINN
 
 
-def create_animation(fig, ax, limits=(-2.4, 2.4)):
+def create_animation(fig, ax, env_name, limits=(-2.4, 2.4)):
     """
     Create the initial figure and elements for the animation.
     """
@@ -19,7 +19,7 @@ def create_animation(fig, ax, limits=(-2.4, 2.4)):
     pend_plot, = ax.plot([], [], 'o-', markersize=10)  # Pendulum
     ax.set_xlim(limits)  # CartPole cart limits
     ax.set_ylim(-1.5, 1.5)
-    ax.set_title('CartPole Visualization')
+    ax.set_title('CartPole Visualization {}'.format(env_name))
     ax.set_xlabel('Cart Position')
     ax.set_ylabel('Pendulum Position')
 
@@ -61,8 +61,8 @@ def visualize_interactive(env1, env2, max_steps=500, visualize=True, slow_motion
     # Create the animation with matplotlib
     if visualize:
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))  # Two subplots for two envs
-        update_plot1 = create_animation(fig, ax1, limits=(-2.4, 2.4))
-        update_plot2 = create_animation(fig, ax2, limits=(-2.4, 2.4))
+        update_plot1 = create_animation(fig, ax1, "pinn", limits=(-2.4, 2.4))
+        update_plot2 = create_animation(fig, ax2, "ori", limits=(-2.4, 2.4))
 
     clock = pygame.time.Clock()
 
