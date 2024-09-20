@@ -94,7 +94,7 @@ class PINNCartPoleEnv(gym.Env):
             self.steps_beyond_done += 1
             reward = 0.0
 
-        return np.array(self.state, dtype=np.float32), reward, done, False, {}
+        return np.array(self.state, dtype=np.float32), reward, done, False, {"predicted_force": force}
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)

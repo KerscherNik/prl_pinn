@@ -13,7 +13,7 @@ import gymnasium as gym
 
 def main():
     file_paths = ["data/cartpole_data.csv"]
-    sequence_length = 50  # Adjust this value as needed
+    sequence_length = 5  # Adjust this value as needed
 
     # Load and preprocess the data
     train_dataloader, test_dataloader, scaler = get_dataloaders(file_paths, batch_size=32, sequence_length=sequence_length, test_size=0.2)
@@ -27,7 +27,7 @@ def main():
         "mu_p": 0.01,
         "force_mag": 10.0
     }
-
+    """
     models = {}
     for predict_friction in [False]:
         print(f"{'With' if predict_friction else 'Without'} friction prediction:")
@@ -48,13 +48,13 @@ def main():
         # Save the trained model
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         torch.save(trained_model.state_dict(), f'model_archive/trained_pinn_model_{"with" if predict_friction else "without"}_friction_{timestamp}.pth')
-        """
+        """"""
         # Uncomment this block to load a saved model and evaluate it directly. Make sure to comment out previous training block and hyperparameter optimization block. At evaluate_pinn use the loaded model instead of trained_model.
         # Load the already saved model
         saved_model_path = f'model_archive/trained_pinn_model_without_friction_20240919_092248.pth'
         loaded_model = CartpolePINN(sequence_length, predict_friction=predict_friction)
         loaded_model.load_state_dict(torch.load(saved_model_path))
-        """
+        """"""
         # visualize interactively: uncomment only this block and the block above to load the pinn model
         #original_env = Monitor(gym.make('CartPole-v1'))
         #pinn_env = Monitor(PINNCartPoleEnv(loaded_model, params))
@@ -72,7 +72,7 @@ def main():
         print(f"Avg Physics Loss: {avg_physics_loss:.4f}")
         print(f"Mean Relative Error: {mean_relative_error:.4f}")
         print("\n" + "="*50 + "\n")
-
+        """
 
     # Compare environments
     #rewards_orig, rewards_pinn_with_friction = compare_environments(models[True], params, True)

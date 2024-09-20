@@ -38,7 +38,7 @@ def collect_trajectory(env, model, max_steps=500, visualize=False):
     tuple: Numpy arrays of states, actions, and rewards.
     """
     obs, _ = env.reset()
-    states, actions, rewards = [], [], []
+    states, actions, rewards, predicted_forces = [], [], [], []
 
     animation = create_animation(obs, max_steps, visualize)
 
@@ -46,15 +46,18 @@ def collect_trajectory(env, model, max_steps=500, visualize=False):
         action, _ = model.predict(obs, deterministic=True)
         states.append(obs)
         actions.append(action)
-        obs, reward, terminated, truncated, _ = env.step(action)
+        obs, reward, terminated, truncated, info = env.step(action)
         rewards.append(reward)
+
+        if "predicted_force" in info:
+            predicted_forces.append(info["predicted_force"])
 
         plot_trajectory(states, actions, rewards, visualize)
 
         if terminated or truncated:
             break
 
-    return np.array(states), np.array(actions), np.array(rewards)
+    return (np.array(states), np.array(actions), np.array(rewards), np.array(predicted_forces) if predicted_forces else None)
 
 def compare_environments(pinn_model, params, predict_friction=False, num_episodes=100, max_steps=500, visualize=False):
     """
@@ -94,8 +97,8 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     print(f"Mean reward: {pinn_mean:.2f} +/- {pinn_std:.2f}")
 
     # Collect trajectories
-    original_states, original_actions, original_rewards = collect_trajectory(original_env, ppo_model, max_steps, visualize)
-    pinn_states, pinn_actions, pinn_rewards = collect_trajectory(pinn_env, ppo_model, max_steps, visualize)
+    original_states, original_actions, original_rewards, _ = collect_trajectory(original_env, ppo_model, max_steps, visualize)
+    pinn_states, pinn_actions, pinn_rewards, pinn_forces = collect_trajectory(pinn_env, ppo_model, max_steps, visualize)
 
     # Plot state comparisons
     fig, axs = plt.subplots(2, 2, figsize=(15, 10))
@@ -123,6 +126,32 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.savefig('media/reward_comparison.png')
     plt.close()
+
+    force_mag = original_env.force_mag  # Die konstante Kraft, die in der Gym-Umgebung verwendet wird
+    # Compare predicted vs actual forces and actions, also include pole angle
+    if pinn_forces is not None:
+        plt.figure(figsize=(10, 5))
+        plt.plot(original_actions, label='Original Actions (Gym Forces)', alpha=0.7)
+        plt.plot(pinn_forces, label='Predicted Forces (PINN)', alpha=0.7)
+        plt.title('Force Comparison: Gym vs PINN Prediction')
+        plt.xlabel('Time Step')
+        plt.ylabel('Force')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.savefig('media/force_comparison.png')
+        plt.close()
+
+        # Create a comparison table of actual actions, predicted actions, predicted forces, and pole angles
+        print(
+            f"{'Time Step':<10}{'Actual Action':<15}{'Predicted Action':<20}{'Predicted Force':<20}{'Pole Angle (rad)':<20}")
+        for t in range(len(original_actions)):
+            actual_action = original_actions[t]
+            predicted_action = pinn_actions[t] if pinn_actions is not None else "N/A"
+            predicted_force = pinn_forces[t] if pinn_forces is not None else "N/A"
+            pole_angle = pinn_states[t, 2]  # Assuming the 3rd value in state array is pole angle (theta)
+
+            print(f"{t:<10}{actual_action:<15}{predicted_action:<20}{predicted_force:<20.5f}{pole_angle:<20.5f}")
+
 
     # Close environments
     original_env.close()
