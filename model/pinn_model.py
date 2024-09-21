@@ -42,9 +42,17 @@ class CartpolePINN(nn.Module):
                                 torch.zeros(self.sequence_length, device=self.device)], dim=0).unsqueeze(0)
         
         F = self.forward(sequence)
-        
-        params = {'g': 9.81, 'm_c': 1.0, 'm_p': 0.1, 'l': 0.5, 'mu_c': 0.0, 'mu_p': 0.0}  # Example params, adjust as needed
-        
+
+        params = {
+            "m_c": 1.0,
+            "m_p": 0.1,
+            "l": 1.0,
+            "g": 9.8,
+            "mu_c": 0.0,
+            "mu_p": 0.0,
+            "force_mag": 10.0
+        }
+
         theta_ddot = calculate_theta_ddot(F, x_dot, theta, theta_dot, params['mu_c'], params['mu_p'], params)
         x_ddot = calculate_x_ddot(F, x_dot, theta, theta_dot, params['mu_c'], params['mu_p'], params)
 
