@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     file_paths = ["data/cartpole_data.csv"]
-    sequence_length = 5  # Adjust this value as needed
+    sequence_length = 50  # Adjust this value as needed
 
     # Load and preprocess the data
     train_dataloader, test_dataloader, scaler = get_dataloaders(file_paths, batch_size=32, sequence_length=sequence_length, test_size=0.2, verbose=False)
@@ -89,7 +89,7 @@ def main():
 
         # Evaluate model
         logger.info("Evaluating model...")
-        mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(trained_model, test_dataloader, params, scaler, predict_friction) #TODO: trained_model
+        mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(trained_model, test_dataloader, params, scaler, predict_friction)
         """ logger.info("Evaluating model...")
         mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(loaded_model, test_dataloader, params, scaler, predict_friction) #TODO: trained_model """
 
@@ -114,7 +114,7 @@ def main():
 
     # Compare environments
     logger.info("Comparing CartPole environments...")
-    rewards_orig, rewards_pinn_without_friction = compare_environments(trained_model, params, False) #TODO: trained_model
+    rewards_orig, rewards_pinn_without_friction = compare_environments(trained_model, params, False)
     """ rewards_orig, rewards_pinn_without_friction = compare_environments(loaded_model, params, False) #TODO: trained_model """
 
 
