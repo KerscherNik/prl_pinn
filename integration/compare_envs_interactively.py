@@ -81,7 +81,7 @@ def create_side_by_side_env(env1, env2):
 
     return SideBySideEnv(env1, env2)
 
-def visualize_side_by_side(env1, env2, ppo_model=None, max_steps=500, slow_motion_factor=0.1):
+def visualize_side_by_side(env1, env2, ppo_model=None, max_steps=500, slow_motion_factor=0.1, save_folder_name=""):
     pygame.init()
     screen = pygame.display.set_mode((1000, 600))
     pygame.display.set_caption('CartPole Environment Comparison')
@@ -102,6 +102,10 @@ def visualize_side_by_side(env1, env2, ppo_model=None, max_steps=500, slow_motio
     current_env1_reward = 0
     current_env2_reward = 0
     termination_reason = "Maximum Steps Reached"
+    
+    pinn_forces = []
+    pinn_mu_c = []
+    pinn_mu_p = []
 
     input_buffer = InputBuffer()
 
@@ -157,6 +161,12 @@ def visualize_side_by_side(env1, env2, ppo_model=None, max_steps=500, slow_motio
             f"Original Env State: {obs['env1']}",
             f"PINN Env State: {obs['env2']}",
         ]
+        if isinstance(env2, PINNCartPoleEnv) and env2.predict_friction:
+            info_text.extend([
+                f"PINN Predicted Force: {info['env2']['predicted_force']:.2f}",
+                f"PINN Predicted mu_c: {info['env2']['predicted_mu_c']:.2f}",
+                f"PINN Predicted mu_p: {info['env2']['predicted_mu_p']:.2f}",
+            ])
         for i, text in enumerate(info_text):
             info_surface = font.render(text, True, (0, 0, 0))
             screen.blit(info_surface, (10, 420 + i * 20))
@@ -189,6 +199,10 @@ def visualize_side_by_side(env1, env2, ppo_model=None, max_steps=500, slow_motio
         if isinstance(env2, PINNCartPoleEnv):
             logger.info(f"PINN Predicted Force: {info['env2']['predicted_force']}")
             logger.info(f"PINN Scaled Force: {info['env2']['scaled_force']}")
+            pinn_forces.append(info['env2']['predicted_force'])
+            if env2.predict_friction:
+                pinn_mu_c.append(info['env2']['predicted_mu_c'])
+                pinn_mu_p.append(info['env2']['predicted_mu_p'])
 
         env1_rewards.append(rewards['env1'])
         env2_rewards.append(rewards['env2'])
@@ -206,6 +220,28 @@ def visualize_side_by_side(env1, env2, ppo_model=None, max_steps=500, slow_motio
     env2.close()
     pygame.quit()
 
+    # Add plots for force and friction coefficients if applicable
+    if isinstance(env2, PINNCartPoleEnv):
+        plt.figure(figsize=(10, 5))
+        plt.plot(pinn_forces, label='Predicted Force')
+        plt.xlabel('Steps')
+        plt.ylabel('Force')
+        plt.title('PINN Predicted Force')
+        plt.legend()
+        plt.savefig(f'media/{save_folder_name}/pinn_force_plot.png')
+        plt.close()
+
+        if env2.predict_friction:
+            plt.figure(figsize=(10, 5))
+            plt.plot(pinn_mu_c, label='Predicted mu_c')
+            plt.plot(pinn_mu_p, label='Predicted mu_p')
+            plt.xlabel('Steps')
+            plt.ylabel('Friction Coefficient')
+            plt.title('PINN Predicted Friction Coefficients')
+            plt.legend()
+            plt.savefig(f'media/{save_folder_name}/pinn_friction_plot.png')
+            plt.close()
+            
     # Display end-of-episode statistics
     print(f"\nEpisode ended. Reason: {termination_reason}")
     print(f"Total Steps: {step}")
@@ -262,8 +298,10 @@ if __name__ == "__main__":
         "tau": 0.02
     }
 
+    predict_friction = False  # Set this to True when using a model that predicts friction
+    save_folder_name = "with_friction" if predict_friction else "without_friction"
     saved_model_path = 'model_archive/trained_pinn_model_without_friction_20240922_183400.pth'
-    loaded_model = CartpolePINN(sequence_length, predict_friction=False)
+    loaded_model = CartpolePINN(sequence_length, predict_friction=predict_friction)
     loaded_model.load_state_dict(torch.load(saved_model_path))
 
     original_env = gym.make('CartPole-v1', render_mode="rgb_array")
@@ -274,7 +312,7 @@ if __name__ == "__main__":
     ppo_model.learn(total_timesteps=5000)
 
     # Visualize with PPO model control
-    visualize_side_by_side(original_env, pinn_env, ppo_model=ppo_model, slow_motion_factor=0.2)
+    visualize_side_by_side(original_env, pinn_env, ppo_model=ppo_model, slow_motion_factor=0.2, save_folder_name=save_folder_name)
 
     # Uncomment to visualize with keyboard control instead
     #visualize_side_by_side(original_env, pinn_env, slow_motion_factor=0.6)

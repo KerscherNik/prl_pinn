@@ -72,7 +72,7 @@ def collect_trajectory(env, model, max_steps=500, visualize=False):
     logger.debug(f"Trajectory collected: {len(states)} states, {len(actions)} actions.")
     return (np.array(states), np.array(actions), np.array(rewards), np.array(predicted_forces) if predicted_forces else None)
 
-def compare_environments(pinn_model, params, predict_friction=False, num_episodes=100, max_steps=500, visualize=False):
+def compare_environments(pinn_model, params, predict_friction=False, num_episodes=100, max_steps=500, visualize=False, save_folder_name=""):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pinn_model = pinn_model.to(device)
 
@@ -82,9 +82,11 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     pinn_env = Monitor(PINNCartPoleEnv(pinn_model, params))
 
     # Train a policy on the original environment
-    logger.info("Training PPO agent on the original CartPole environment.")
+    total_timesteps_ppo = 50000
+    logger.info(f"Training PPO agent on the original CartPole environment for {total_timesteps_ppo} total timesteps.")
+    
     ppo_model = PPO('MlpPolicy', original_env, verbose=1, device=device)
-    ppo_model.learn(total_timesteps=20000)
+    ppo_model.learn(total_timesteps=total_timesteps_ppo)
 
     # Evaluate on both environments
     original_mean, original_std = evaluate_env(original_env, ppo_model, num_episodes)
@@ -111,7 +113,7 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
         axs[i // 2, i % 2].set_ylabel('Value')
         axs[i // 2, i % 2].legend()
     plt.tight_layout()
-    plt.savefig('media/state_comparison.png')
+    plt.savefig(f'media/{save_folder_name}/state_comparison.png')
     plt.close()
 
     # Plot reward comparison
@@ -124,30 +126,34 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     plt.ylabel('Cumulative Reward')
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.7)
-    plt.savefig('media/reward_comparison.png')
+    plt.savefig(f'media/{save_folder_name}/reward_comparison.png')
     plt.close()
 
     # Compare predicted vs actual forces
     if pinn_forces is not None:
         logger.info("Comparing predicted forces from PINN and forces from Gym.")
         plt.figure(figsize=(10, 5))
-        plt.plot(original_env.force_mag * np.ones(len(original_actions)), label='Gym Forces', alpha=0.7)  # Constant force used in Gym
+        plt.plot(original_env.force_mag * np.ones(len(original_actions)), label='Gym Forces', alpha=0.7)
         plt.plot(pinn_forces, label='Predicted Forces (PINN)', alpha=0.7)
         plt.title('Force Comparison: Gym vs PINN Prediction')
         plt.xlabel('Time Step')
         plt.ylabel('Force')
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.7)
-        plt.savefig('media/force_comparison.png')
+        plt.savefig(f'media/{save_folder_name}/force_comparison.png')
         plt.close()
 
-    # Create a comparison table for predicted forces and pole angles
-    logger.info("Generating force and pole angle comparison table.")
-    print(f"{'Time Step':<10}{'Predicted Force':<20}{'Pole Angle (rad)':<20}")
+    # Create a comparison table for predicted forces, friction coefficients, and pole angles
+    logger.info("Generating force, friction, and pole angle comparison table.")
+    print(f"{'Time Step':<10}{'Predicted Force':<20}{'Pole Angle (rad)':<20}{'Predicted mu_c':<20}{'Predicted mu_p':<20}")
     for t in range(len(pinn_forces)):
-        predicted_force = pinn_forces[t] if t < len(pinn_forces) else "N/A"
-        pole_angle = pinn_states[t, 2] if t < len(pinn_states) else "N/A"
-        print(f"{t:<10}{predicted_force:<20.5f}{pole_angle:<20.5f}")
+        predicted_force = pinn_forces[t] if t < len(pinn_forces) and isinstance(pinn_forces[t], (int, float)) else float('nan')
+        pole_angle = pinn_states[t, 2] if t < len(pinn_states) and isinstance(pinn_states[t, 2], (int, float)) else float('nan')
+        mu_c = pinn_env.unwrapped.info.get("predicted_mu_c", float('nan')) if isinstance(pinn_env.unwrapped.info.get("predicted_mu_c"), (int, float)) else float('nan')
+        mu_p = pinn_env.unwrapped.info.get("predicted_mu_p", float('nan')) if isinstance(pinn_env.unwrapped.info.get("predicted_mu_p"), (int, float)) else float('nan')
+        
+        print(f"{t:<10}{predicted_force:<20.5f}{pole_angle:<20.5f}{mu_c:<20.5f}{mu_p:<20.5f}")
+
 
     # Optional: Plot actions taken in the original environment
     logger.info("Plotting actions taken in the original environment.")
@@ -158,7 +164,7 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     plt.ylabel('Action')
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.7)
-    plt.savefig('media/actions_comparison.png')
+    plt.savefig(f'media/{save_folder_name}/actions_comparison.png')
     plt.close()
 
     # Close environments
@@ -173,9 +179,11 @@ if __name__ == "__main__":
     logger.info("Comparing environments with preloaded trained model...")
     # Load your trained PINN model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    pinn_model = CartpolePINN(predict_friction=False, sequence_length=10)  # Adjust sequence_length as needed
+    predict_friction = True  # Set this to True when using a model that predicts friction
+    save_folder_name = "with_friction" if predict_friction else "without_friction"
+    pinn_model = CartpolePINN(predict_friction=predict_friction, sequence_length=10)
     try:
-        pinn_model.load_state_dict(torch.load('../model_archive/trained_pinn_model_without_friction_20240919_092248.pth', map_location=device))
+        pinn_model.load_state_dict(torch.load('../model_archive/trained_pinn_model_with_friction_20240922_183400.pth', map_location=device))
         logger.info("Successfully loaded trained model.")
     except Exception as e:
         logger.error(f"Error loading model: {e}")
@@ -193,4 +201,4 @@ if __name__ == "__main__":
         "force_mag": 10.0
     }
 
-    compare_environments(pinn_model, params, visualize=True)
+    compare_environments(pinn_model, params, predict_friction=True, num_episodes=100, max_steps=500, visualize=False, save_folder_name=save_folder_name)

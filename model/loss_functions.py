@@ -1,7 +1,7 @@
 import torch
 from model.physics_helpers import calculate_theta_ddot, calculate_x_ddot
 
-def pinn_loss(model, sequences, targets, params, physics_weight=1.0, t_span=1.0, reg_weight = 1e-5, predict_friction = False, simulation_callback=None, loss_calculation_callback=None):
+def pinn_loss(model, sequences, targets, params, physics_weight=1.0, t_span=1.0, reg_weight=1e-5, predict_friction=False, simulation_callback=None, loss_calculation_callback=None):
     batch_size = sequences.shape[0]
     device = sequences.device
     
@@ -18,19 +18,25 @@ def pinn_loss(model, sequences, targets, params, physics_weight=1.0, t_span=1.0,
         initial_state = sequences[i, -1, :4]  # Last state in sequence (x, x_dot, theta, theta_dot)
         target_state = targets[i, :4]  # Next true state (no action)
         
+        # Update params with predicted friction if applicable
+        current_params = params.copy()
+        if predict_friction:
+            current_params['mu_c'] = mu_c[i].item()
+            current_params['mu_p'] = mu_p[i].item()
+        
         # Simulate next state using the predicted force and the current state
-        predicted_next_state = model.simulate_next_state(initial_state, F[i], params, callback=simulation_callback)
+        predicted_next_state = model.simulate_next_state(initial_state, F[i], current_params, callback=simulation_callback)
         
         # MSE loss between the predicted next state and the true target state
         mse_loss = torch.nn.functional.mse_loss(predicted_next_state, target_state)
         
         # Physics loss by ensuring the accelerations (x_ddot, theta_ddot) follow the ODEs
         x, x_dot, theta, theta_dot = predicted_next_state
-        x_ddot_pred = calculate_x_ddot(F[i], x_dot, theta, theta_dot, params['mu_c'], params['mu_p'], params)
-        theta_ddot_pred = calculate_theta_ddot(F[i], x_dot, theta, theta_dot, params['mu_c'], params['mu_p'], params)
+        x_ddot_pred = calculate_x_ddot(F[i], x_dot, theta, theta_dot, current_params['mu_c'], current_params['mu_p'], current_params)
+        theta_ddot_pred = calculate_theta_ddot(F[i], x_dot, theta, theta_dot, current_params['mu_c'], current_params['mu_p'], current_params)
 
-        x_ddot_true = calculate_x_ddot(target_state, x_dot, theta, theta_dot, params['mu_c'], params['mu_p'], params)
-        theta_ddot_true = calculate_theta_ddot(target_state, x_dot, theta, theta_dot, params['mu_c'], params['mu_p'], params)
+        x_ddot_true = calculate_x_ddot(target_state[1], x_dot, theta, theta_dot, current_params['mu_c'], current_params['mu_p'], current_params)
+        theta_ddot_true = calculate_theta_ddot(target_state[1], x_dot, theta, theta_dot, current_params['mu_c'], current_params['mu_p'], current_params)
         
         physics_loss = (x_ddot_pred - x_ddot_true).pow(2).mean() + (theta_ddot_pred - theta_ddot_true).pow(2).mean()
 

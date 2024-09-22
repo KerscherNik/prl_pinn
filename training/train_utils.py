@@ -7,13 +7,14 @@ from ray.air import session
 from ray.tune.schedulers import ASHAScheduler
 from model.pinn_model import CartpolePINN
 from model.loss_functions import pinn_loss
+import numpy as np
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     handlers=[
                         logging.StreamHandler(),
-                        logging.FileHandler('training.log')
+                        logging.FileHandler('app.log')
                     ])
 
 logger = logging.getLogger(__name__)
@@ -84,41 +85,66 @@ def train_pinn(model, train_dataloader, optimizer, params, num_epochs, physics_w
 
     return model, avg_loss
 
-def objective(config, train_dataloader, test_dataloader, params, predict_friction, sequence_length):
+def objective(config, train_dataloader=None, test_dataloader=None, params=None, predict_friction=False, sequence_length=None):
+    # Initialize model
     model = CartpolePINN(sequence_length=sequence_length, predict_friction=predict_friction)
-    optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5, verbose=True
-    )
     
+    optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     
-    for epoch in range(config["num_epochs"]):
-        model, avg_train_loss = train_pinn(
-            model, train_dataloader, optimizer, params, 1, config["physics_weight"], t_span=1.0, reg_weight=config["reg_weight"]
-        )
-        scheduler.step(avg_train_loss)
-        
-        # Evaluate on test set
-        model.eval()
-        total_test_loss = 0
-        with torch.no_grad():
-            for sequences, targets in test_dataloader:
-                sequences, targets = sequences.to(device), targets.to(device)
-                loss, _, _ = pinn_loss(
-                    model, sequences, targets, params, config["physics_weight"], t_span=1.0, reg_weight=config["reg_weight"]
-                )
-                total_test_loss += loss.item()
-        avg_test_loss = total_test_loss / len(test_dataloader)
-        
-        # Report metrics to Ray Tune
-        session.report({"train_loss": avg_train_loss, "test_loss": avg_test_loss})
+    # Train the model for one epoch
+    model, avg_train_loss = train_pinn(
+        model, 
+        train_dataloader, 
+        optimizer, 
+        params, 
+        num_epochs=config["num_epochs"],
+        physics_weight=config["physics_weight"], 
+        t_span=1.0, 
+        reg_weight=config["reg_weight"], 
+        predict_friction=predict_friction
+    )
+
+    # Evaluate the model on the test set
+    model.eval()
+    
+    total_test_loss = 0
+    total_mse_loss = 0
+    total_physics_loss = 0
+    predicted_mu_c = []
+    predicted_mu_p = []
+    
+    with torch.no_grad():
+        for sequences, targets in test_dataloader:
+            sequences, targets = sequences.to(device), targets.to(device)
+            if predict_friction:
+                predicted_force, mu_c, mu_p = model(sequences)
+                predicted_mu_c.extend(mu_c.cpu().numpy())
+                predicted_mu_p.extend(mu_p.cpu().numpy())
+            else:
+                predicted_force = model(sequences)
+            
+            scaled_force = predicted_force * params['force_mag']
+            
+            loss, mse, physics_loss = pinn_loss(model, sequences, targets, params, predict_friction=predict_friction)
+            total_mse_loss += mse.item()
+            total_physics_loss += physics_loss.item()
+            total_test_loss += loss.item()
+    
+    # Average test loss
+    avg_test_loss = total_test_loss / len(test_dataloader)
+
+    # Report the losses to Ray Tune
+    session.report({"train_loss": avg_train_loss, "test_loss": avg_test_loss})
 
 def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_friction, sequence_length):
+    # Smaller epoch size for faster hyperparameter optimization to find the best configuration
+    # num_epochs is not optimized here
     config = {
         "lr": tune.loguniform(1e-4, 1e-1),
-        "num_epochs": tune.choice([50, 100, 200]),
+        "num_epochs": 10,
         "physics_weight": tune.uniform(0.1, 10.0),
         "reg_weight": tune.loguniform(1e-6, 1e-4)
     }
@@ -136,8 +162,7 @@ def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_
         metric_columns=["train_loss", "test_loss", "training_iteration"]
     )
     
-    # TODO: Uncomment this block to run hyperparameter optimization
-    """ result = tune.run(
+    result = tune.run(
         tune.with_parameters(
             objective, 
             train_dataloader=train_dataloader, 
@@ -149,11 +174,12 @@ def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_
         config=config,
         num_samples=10,
         scheduler=scheduler,
-        progress_reporter=reporter
-    ) """
+        progress_reporter=reporter,
+        log_to_file=("ray_stdout.log", "ray_stderr.log")  # Redirect stdout and stderr
+    )
 
-    #best_trial = result.get_best_trial("test_loss", "min", "last")
-    best_trial = None
+    best_trial = result.get_best_trial("test_loss", "min", "last")
+    
     if best_trial is None:
         logger.warning("Warning: Could not find best trial. Using default configuration.")
         return {

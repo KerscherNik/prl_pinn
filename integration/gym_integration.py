@@ -2,6 +2,7 @@ import gymnasium as gym
 import torch
 import numpy as np
 from scipy.integrate import solve_ivp
+from model.pinn_model import CartpolePINN
 import logging
 
 logging.basicConfig(level=logging.INFO,
@@ -20,6 +21,7 @@ class PINNCartPoleEnv(gym.Env):
 
         self.pinn_model = pinn_model
         self.params = params
+        self.predict_friction = isinstance(self.pinn_model, CartpolePINN) and self.pinn_model.predict_friction
         
         self.gravity = 9.8
         self.masscart = params['m_c']
@@ -51,6 +53,7 @@ class PINNCartPoleEnv(gym.Env):
         self.screen = None
         self.clock = None
         self.isopen = True
+        self.info = {}
 
     def step(self, action):
         err_msg = f"{action!r} ({type(action)}) invalid"
@@ -71,10 +74,23 @@ class PINNCartPoleEnv(gym.Env):
 
         # Predict force using PINN
         with torch.no_grad():
-            predicted_force = self.pinn_model(self.sequence_buffer).item()
+            if self.predict_friction:
+                predicted_force, mu_c, mu_p = self.pinn_model(self.sequence_buffer)
+                predicted_force = predicted_force.item()
+                mu_c = mu_c.item()
+                mu_p = mu_p.item()
+            else:
+                predicted_force = self.pinn_model(self.sequence_buffer).item()
+                mu_c, mu_p = self.params['mu_c'], self.params['mu_p']
 
         # Scale the predicted force to match the original environment
         scaled_force = predicted_force * self.force_mag
+
+        # Update params with predicted friction if applicable
+        current_params = self.params.copy()
+        if self.predict_friction:
+            current_params['mu_c'] = mu_c
+            current_params['mu_p'] = mu_p
 
         # Use scaled force for state estimation
         def cartpole_ode(t, y):
@@ -118,11 +134,17 @@ class PINNCartPoleEnv(gym.Env):
         if self.render_mode == "human":
             self.render()
         
-        return np.array(self.state, dtype=np.float32), reward, done, False, {
+        info = {
             "predicted_force": predicted_force,
             "scaled_force": scaled_force,
-            "reward": reward 
+            "reward": reward
         }
+        if self.predict_friction:
+            info["predicted_mu_c"] = mu_c
+            info["predicted_mu_p"] = mu_p
+        
+        self.info = info
+        return np.array(self.state, dtype=np.float32), reward, done, False, info
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)

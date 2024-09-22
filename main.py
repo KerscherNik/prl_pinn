@@ -15,29 +15,21 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     handlers=[
                         logging.StreamHandler(),
-                        logging.FileHandler('main_app.log')
+                        logging.FileHandler('app.log')
                     ])
 
 logger = logging.getLogger(__name__)
 
 def main():
+    
+    ############################################################################################################
+    #    Currently best trained model: model_archive/trained_pinn_model_without_friction_20240922_183400.pth   #
+    ############################################################################################################
     file_paths = ["data/cartpole_data.csv"]
     sequence_length = 5  # Adjust this value as needed
 
     # Load and preprocess the data
     train_dataloader, test_dataloader, scaler = get_dataloaders(file_paths, batch_size=32, sequence_length=sequence_length, test_size=0.2, verbose=False)
-
-    """ Params for real cartpole
-    params = {
-        "m_c": 0.466,
-        "m_p": 0.06,
-        "l": 0.201,
-        "g": 9.81,
-        "mu_c": 0.1,
-        "mu_p": 0.01,
-        "force_mag": 10.0,
-        "tau" : 0.02  # Assuming a 50Hz sampling rate (1/50 = 0.02 seconds)
-    }"""
 
     # Params for simulated cartpole
     params = {
@@ -50,16 +42,19 @@ def main():
         "force_mag": 10.0,
         "tau" : 0.02  # Assuming a 50Hz sampling rate (1/50 = 0.02 seconds)
     }
-
+    num_epochs = 100
+    
     models = {}
-    for predict_friction in [False]:
-        """ logger.info(f"{'With' if predict_friction else 'Without'} friction prediction:")
-
+    for predict_friction in [True, False]:
+        logger.info(f"{'With' if predict_friction else 'Without'} friction prediction:")
+        save_folder_name = "with_friction" if predict_friction else "without_friction"
         # Hyperparameter optimization
         logger.info("Starting hyperparameter optimization...")
         best_config = optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_friction, sequence_length)
+        best_config["num_epochs"] = num_epochs
         logger.info(f"Best hyperparameters found: {best_config}")
-
+        
+        
         # Create and train model with best hyperparameters
         logger.info("Training final model with best hyperparameters...")
         model = CartpolePINN(sequence_length, predict_friction=predict_friction)
@@ -71,21 +66,12 @@ def main():
         # Save the trained model
         logger.info("Saving model...")
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        torch.save(trained_model.state_dict(), f'model_archive/trained_pinn_model_{"with" if predict_friction else "without"}_friction_{timestamp}.pth')
-        logger.info(f"Model saved under name: trained_pinn_model_{'with' if predict_friction else 'without'}_friction_{timestamp}.pth") """
+        torch.save(trained_model.state_dict(), f'model_archive/{save_folder_name}/trained_pinn_model_{"with" if predict_friction else "without"}_friction_{timestamp}.pth')
+        logger.info(f"Model saved under name: trained_pinn_model_{'with' if predict_friction else 'without'}_friction_{timestamp}.pth")
         
-        # Uncomment this block to load a saved model and evaluate it directly. Make sure to comment out previous training block and hyperparameter optimization block. At evaluate_pinn use the loaded model instead of trained_model.
-        # Load the already saved model
-        saved_model_path = f'model_archive/trained_pinn_model_without_friction_20240922_183400.pth'
-        loaded_model = CartpolePINN(sequence_length, predict_friction=predict_friction)
-        loaded_model.load_state_dict(torch.load(saved_model_path, weights_only=True))
-
-
         # Evaluate model
-        """ logger.info("Evaluating model...")
-        mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(trained_model, test_dataloader, params, scaler, predict_friction) #TODO: trained_model """
         logger.info("Evaluating model...")
-        mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(loaded_model, test_dataloader, params, scaler, predict_friction) #TODO: trained_model
+        mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(trained_model, test_dataloader, params, scaler, predict_friction, save_folder_name)
 
         logger.info(f"Results for {'with' if predict_friction else 'without'} friction prediction:")
         logger.info(f"MSE: {mse:.4f}")
@@ -95,21 +81,19 @@ def main():
         logger.info(f"Mean Relative Error: {mean_relative_error:.4f}")
         logger.info("\n" + "="*50 + "\n")
 
-    """
-    # Load the trained model
-    trained_model = CartpolePINN(predict_friction=False, sequence_length=sequence_length)
-    trained_model.load_state_dict(torch.load('model_archive/trained_pinn_model_without_friction_20240921_224527.pth'))
-    """
-
     # Compare environments
     logger.info("Comparing CartPole environments...")
-    """ rewards_orig, rewards_pinn_without_friction = compare_environments(trained_model, params, False) #TODO: trained_model """
-    rewards_orig, rewards_pinn_without_friction = compare_environments(loaded_model, params, False) #TODO: trained_model
-
+    logger.info("Start comparison without friction prediction:")
+    rewards_orig, rewards_pinn_without_friction = compare_environments(models[False], params, predict_friction=False, num_episodes=100, max_steps=500, visualize=False, save_folder_name=save_folder_name)
+    rewards_pinn_with_friction = None
+    if True in models:
+        logger.info("Start comparison with friction prediction:")
+        _, rewards_pinn_with_friction = compare_environments(models[True], params, predict_friction=True, num_episodes=100, max_steps=500, visualize=False, save_folder_name=save_folder_name)
 
     logger.info("Average reward (Original): {:.2f}".format(sum(rewards_orig) / len(rewards_orig)))
-    #logger.info("Average reward (PINN with friction): {:.2f}".format(sum(rewards_pinn_with_friction) / len(rewards_pinn_with_friction)))
     logger.info("Average reward (PINN without friction): {:.2f}".format(sum(rewards_pinn_without_friction) / len(rewards_pinn_without_friction)))
+    if rewards_pinn_with_friction is not None:
+        logger.info("Average reward (PINN with friction): {:.2f}".format(sum(rewards_pinn_with_friction) / len(rewards_pinn_with_friction)))
 
     logger.info("Done!")
 
