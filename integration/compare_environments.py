@@ -8,6 +8,16 @@ from stable_baselines3.common.monitor import Monitor
 from integration.gym_integration import PINNCartPoleEnv
 from model.pinn_model import CartpolePINN
 from visualization.visualization import create_animation, plot_trajectory
+import logging
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.StreamHandler(),  # Output to console
+                        logging.FileHandler('app.log')  # Log to a file
+                    ])
+
+logger = logging.getLogger(__name__)
 
 def evaluate_env(env, model, num_episodes=100):
     """
@@ -21,6 +31,7 @@ def evaluate_env(env, model, num_episodes=100):
     Returns:
     tuple: Mean and standard deviation of rewards.
     """
+    logger.info(f"Evaluating environment with {num_episodes} episodes.")
     mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=num_episodes)
     return mean_reward, std_reward
 
@@ -42,7 +53,7 @@ def collect_trajectory(env, model, max_steps=500, visualize=False):
 
     animation = create_animation(obs, max_steps, visualize)
 
-    for _ in range(max_steps):
+    for step in range(max_steps):
         action, _ = model.predict(obs, deterministic=True)
         states.append(obs)
         actions.append(action)
@@ -55,52 +66,40 @@ def collect_trajectory(env, model, max_steps=500, visualize=False):
         plot_trajectory(states, actions, rewards, visualize)
 
         if terminated or truncated:
+            logger.info(f"Trajectory collection terminated after {step + 1} steps.")
             break
 
+    logger.debug(f"Trajectory collected: {len(states)} states, {len(actions)} actions.")
     return (np.array(states), np.array(actions), np.array(rewards), np.array(predicted_forces) if predicted_forces else None)
 
 def compare_environments(pinn_model, params, predict_friction=False, num_episodes=100, max_steps=500, visualize=False):
-    """
-    Compare performance of policy in original CartPole env and in PINN-based env.
-    Trains a policy on gym env and compares its performance on both environments.
-    
-    Args:
-    pinn_model (CartpolePINN): The trained PINN model.
-    params (dict): Parameters for the CartPole environment.
-    predict_friction (bool): Whether the PINN model predicts friction.
-    num_episodes (int): Number of episodes for evaluation.
-    max_steps (int): Maximum steps per episode.
-    visualize (bool): Whether to visualize the trajectories.
-    
-    Returns:
-    tuple: Lists of rewards for original and PINN environments.
-    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pinn_model = pinn_model.to(device)
-    
+
+    logger.info("Setting up environments for comparison.")
     # Create environments with Monitor wrapper
     original_env = Monitor(gym.make('CartPole-v1'))
     pinn_env = Monitor(PINNCartPoleEnv(pinn_model, params))
 
     # Train a policy on the original environment
-    print("Training PPO agent on original CartPole environment...")
+    logger.info("Training PPO agent on the original CartPole environment.")
     ppo_model = PPO('MlpPolicy', original_env, verbose=1, device=device)
-    ppo_model.learn(total_timesteps=50000) # TODO: Adjust total_timesteps as needed
+    ppo_model.learn(total_timesteps=5000)
 
     # Evaluate on both environments
-    print("Evaluating on original environment:")
     original_mean, original_std = evaluate_env(original_env, ppo_model, num_episodes)
-    print(f"Mean reward: {original_mean:.2f} +/- {original_std:.2f}")
+    logger.info(f"Original environment - Mean reward: {original_mean:.2f} +/- {original_std:.2f}")
 
-    print("\nEvaluating on PINN-based environment:")
     pinn_mean, pinn_std = evaluate_env(pinn_env, ppo_model, num_episodes)
-    print(f"Mean reward: {pinn_mean:.2f} +/- {pinn_std:.2f}")
+    logger.info(f"PINN environment - Mean reward: {pinn_mean:.2f} +/- {pinn_std:.2f}")
 
     # Collect trajectories
+    logger.info("Collecting trajectories from both environments.")
     original_states, original_actions, original_rewards, _ = collect_trajectory(original_env, ppo_model, max_steps, visualize)
     pinn_states, pinn_actions, pinn_rewards, pinn_forces = collect_trajectory(pinn_env, ppo_model, max_steps, visualize)
 
     # Plot state comparisons
+    logger.info("Plotting state comparisons.")
     fig, axs = plt.subplots(2, 2, figsize=(15, 10))
     state_labels = ['Cart Position', 'Cart Velocity', 'Pole Angle', 'Pole Angular Velocity']
     for i in range(4):
@@ -116,6 +115,7 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     plt.close()
 
     # Plot reward comparison
+    logger.info("Plotting reward comparisons.")
     plt.figure(figsize=(10, 5))
     plt.plot(np.cumsum(original_rewards), label='Original', alpha=0.7)
     plt.plot(np.cumsum(pinn_rewards), label='PINN', alpha=0.7)
@@ -127,11 +127,11 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     plt.savefig('media/reward_comparison.png')
     plt.close()
 
-    force_mag = original_env.force_mag  # Die konstante Kraft, die in der Gym-Umgebung verwendet wird
-    # Compare predicted vs actual forces and actions, also include pole angle
+    # Compare predicted vs actual forces
     if pinn_forces is not None:
+        logger.info("Comparing predicted forces from PINN and forces from Gym.")
         plt.figure(figsize=(10, 5))
-        plt.plot(original_actions, label='Original Actions (Gym Forces)', alpha=0.7)
+        plt.plot(original_env.force_mag * np.ones(len(original_actions)), label='Gym Forces', alpha=0.7)  # Constant force used in Gym
         plt.plot(pinn_forces, label='Predicted Forces (PINN)', alpha=0.7)
         plt.title('Force Comparison: Gym vs PINN Prediction')
         plt.xlabel('Time Step')
@@ -141,34 +141,45 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
         plt.savefig('media/force_comparison.png')
         plt.close()
 
-        # Create a comparison table of actual actions, predicted actions, predicted forces, and pole angles
-        print(
-            f"{'Time Step':<10}{'Actual Action':<15}{'Predicted Action':<20}{'Predicted Force':<20}{'Pole Angle (rad)':<20}")
-        for t in range(len(original_actions)):
-            actual_action = original_actions[t]
-            predicted_action = pinn_actions[t] if pinn_actions is not None else "N/A"
-            predicted_force = pinn_forces[t] if pinn_forces is not None else "N/A"
-            pole_angle = pinn_states[t, 2]  # Assuming the 3rd value in state array is pole angle (theta)
+    # Create a comparison table for predicted forces and pole angles
+    logger.info("Generating force and pole angle comparison table.")
+    print(f"{'Time Step':<10}{'Predicted Force':<20}{'Pole Angle (rad)':<20}")
+    for t in range(len(pinn_forces)):
+        predicted_force = pinn_forces[t] if t < len(pinn_forces) else "N/A"
+        pole_angle = pinn_states[t, 2] if t < len(pinn_states) else "N/A"
+        print(f"{t:<10}{predicted_force:<20.5f}{pole_angle:<20.5f}")
 
-            print(f"{t:<10}{actual_action:<15}{predicted_action:<20}{predicted_force:<20.5f}{pole_angle:<20.5f}")
-
+    # Optional: Plot actions taken in the original environment
+    logger.info("Plotting actions taken in the original environment.")
+    plt.figure(figsize=(10, 5))
+    plt.plot(original_actions, label='Original Actions', alpha=0.7)
+    plt.title('Actions Taken in Original Environment')
+    plt.xlabel('Time Step')
+    plt.ylabel('Action')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.savefig('media/actions_comparison.png')
+    plt.close()
 
     # Close environments
+    logger.info("Closing environments.")
     original_env.close()
     pinn_env.close()
 
     return original_rewards, pinn_rewards
 
+
 if __name__ == "__main__":
-    print("Comparing environments with preloaded trained model...")
+    logger.info("Comparing environments with preloaded trained model...")
     # Load your trained PINN model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pinn_model = CartpolePINN(predict_friction=False, sequence_length=10)  # Adjust sequence_length as needed
     try:
         pinn_model.load_state_dict(torch.load('../model_archive/trained_pinn_model_without_friction_20240919_092248.pth', map_location=device))
+        logger.info("Successfully loaded trained model.")
     except Exception as e:
-        print(f"Error loading model: {e}")
-        print("Proceeding with untrained model.")
+        logger.error(f"Error loading model: {e}")
+        logger.warning("Proceeding with untrained model.")
     pinn_model = pinn_model.to(device)
     pinn_model.eval()
 

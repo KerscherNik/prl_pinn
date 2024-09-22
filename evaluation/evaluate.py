@@ -2,132 +2,142 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, r2_score
+from model.physics_helpers import calculate_x_ddot, calculate_theta_ddot
 from model.loss_functions import pinn_loss
+from tqdm import tqdm
+import logging
 
-def evaluate_pinn(model, dataloader, params, scaler):
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.StreamHandler(),  # Output to console
+                        logging.FileHandler('app.log')  # Optionally log to a file
+                    ])
+
+logger = logging.getLogger(__name__)
+
+def evaluate_pinn(model, dataloader, params, scaler, predict_friction=False):
     model.eval()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     
-    true_actions = []
-    predicted_actions = []
+    predicted_forces = []
     states = []
+    next_states = []
     total_mse_loss = 0
     total_physics_loss = 0
 
+    logger.info("Starting evaluation on device: %s", device)
+
+    # Use tqdm for progress bar
     with torch.no_grad():
-        for sequences, targets in dataloader:
+        for sequences, targets in tqdm(dataloader, desc="Evaluating", leave=True):
             sequences, targets = sequences.to(device), targets.to(device)
-            batch_size, seq_len, features = sequences.shape
 
-            predicted_action = model(sequences)
-
-            # Use the entire sequence for loss calculation
-            loss, mse, physics_loss = pinn_loss(model, sequences, targets, params)
+            predicted_force = model(sequences)
+            
+            # Calculate losses
+            loss, mse, physics_loss = pinn_loss(model, sequences, targets, params, predict_friction=predict_friction)
             total_mse_loss += mse.item()
             total_physics_loss += physics_loss.item()
+            
+            current_state = sequences[:, -1, :4]  # Last state in the sequence
+            next_state = targets[:, :4]  # Next state
 
-            # Extract the last action from targets for comparison
-            true_action = targets[:, -1]
+            predicted_forces.extend(predicted_force.cpu().numpy())
+            states.extend(current_state.cpu().numpy())
+            next_states.extend(next_state.cpu().numpy())
 
-            true_actions.extend(true_action.cpu().numpy())
-            predicted_actions.extend(predicted_action.cpu().numpy())
-            states.extend(sequences[:, -1, :].cpu().numpy())  # Use the last state in the sequence
-
-    true_actions = np.array(true_actions)
-    predicted_actions = np.array(predicted_actions)
+    predicted_forces = np.array(predicted_forces)
     states = np.array(states)
+    next_states = np.array(next_states)
 
-    # Inverse transform the states only
-    true_states_inv = scaler.inverse_transform(states)
-    predicted_states_inv = scaler.inverse_transform(states)
+    states_inv = scaler.inverse_transform(states)  # Transform only the state values, not actions
+    next_states_inv = scaler.inverse_transform(next_states)
 
-    # Combine with true and predicted actions
-    true_combined_inv = np.column_stack((true_states_inv, true_actions))
-    predicted_combined_inv = np.column_stack((predicted_states_inv, predicted_actions))
+    logger.debug("Head of states (inversed):\n%s", states_inv[:5])
+    logger.debug("Head of next states (inversed):\n%s", next_states_inv[:5])
 
-    # Extract the inverse transformed actions
-    true_actions = true_combined_inv[:, -1]
-    predicted_actions = predicted_combined_inv[:, -1]
-    states = true_combined_inv[:, :-1]  # Use true states for plotting
+    # Calculate implied forces based on state transitions
+    implied_forces = calculate_implied_forces(states_inv, next_states_inv, params)
 
-    # Remove NaN values
-    mask = ~np.isnan(true_actions) & ~np.isnan(predicted_actions)
-    true_actions = true_actions[mask]
-    predicted_actions = predicted_actions[mask]
-    states = states[mask]
-
-    if len(true_actions) == 0:
-        print("Warning: All values are NaN. Cannot calculate metrics.")
-        return float('inf'), float('inf'), float('inf'), float('inf'), float('inf')
-
-    # Calculate metrics
-    mse = mean_squared_error(true_actions, predicted_actions)
-    r2 = r2_score(true_actions, predicted_actions)
-    avg_mse_loss = total_mse_loss / len(dataloader)
-    avg_physics_loss = total_physics_loss / len(dataloader)
-    relative_error = np.abs(true_actions - predicted_actions) / (np.abs(true_actions) + 1e-8)
+    # Evaluate the model's predictions
+    mse = mean_squared_error(implied_forces, predicted_forces)
+    r2 = r2_score(implied_forces, predicted_forces)
+    relative_error = np.abs(implied_forces - predicted_forces) / (np.abs(implied_forces) + 1e-8)
     mean_relative_error = np.mean(relative_error)
 
-    print(f"Mean Squared Error: {mse:.4f}")
-    print(f"R² Score: {r2:.4f}")
-    print(f"Average MSE Loss: {avg_mse_loss:.4f}")
-    print(f"Average Physics Loss: {avg_physics_loss:.4f}")
-    print(f"Mean Relative Error: {mean_relative_error:.4f}")
+    # Calculate average losses
+    avg_mse_loss = total_mse_loss / len(dataloader)
+    avg_physics_loss = total_physics_loss / len(dataloader)
+
+    logger.info(f"Mean Squared Error: {mse:.4f}")
+    logger.info(f"R² Score: {r2:.4f}")
+    logger.info(f"Average MSE Loss: {avg_mse_loss:.4f}")
+    logger.info(f"Average Physics Loss: {avg_physics_loss:.4f}")
+    logger.info(f"Mean Relative Error: {mean_relative_error:.4f}")
 
     # Plotting
-    plot_residuals(predicted_actions, true_actions)
-    plot_true_vs_predicted(true_actions, predicted_actions)
-    plot_error_distribution(true_actions, predicted_actions)
-    plot_actions_vs_states(states, true_actions, predicted_actions)
+    plot_true_vs_predicted(implied_forces, predicted_forces)
+    plot_error_distribution(implied_forces, predicted_forces)
+    plot_forces_vs_states(states_inv, implied_forces, predicted_forces)
 
     return mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error
 
-def plot_residuals(predicted_actions, true_actions):
-    plt.figure(figsize=(10, 6))
-    plt.scatter(predicted_actions, true_actions - predicted_actions, alpha=0.5)
-    plt.xlabel("Predicted Actions (N)")
-    plt.ylabel("Residuals (N)")
-    plt.title("Residual Plot: Difference between True and Predicted Actions")
-    plt.grid(True)
-    plt.savefig('media/residual_plot.png', dpi=300, bbox_inches='tight')
-    plt.close()
+def calculate_implied_forces(states, next_states, params):
+    x, x_dot, theta, theta_dot = states.T
+    next_x, next_x_dot, next_theta, next_theta_dot = next_states.T
+    
+    x_ddot = (next_x_dot - x_dot) / params['tau']
+    theta_ddot = (next_theta_dot - theta_dot) / params['tau']
+    
+    # Solve for F using the equations of motion
+    numerator = (params['m_c'] + params['m_p']) * x_ddot + params['m_p'] * params['l'] * np.sin(theta) * (theta_dot**2) - params['m_p'] * params['l'] * np.cos(theta) * theta_ddot
+    denominator = 1 + params['m_p'] * np.sin(theta)**2 / (params['m_c'] + params['m_p'])
+    
+    return numerator / denominator
 
-def plot_true_vs_predicted(true_actions, predicted_actions):
+def plot_true_vs_predicted(implied_forces, predicted_forces):
+    logger.info("Plotting Implied vs Predicted Forces...")
     plt.figure(figsize=(10, 6))
-    plt.scatter(true_actions, predicted_actions, alpha=0.5)
-    min_val = min(min(true_actions), min(predicted_actions))
-    max_val = max(max(true_actions), max(predicted_actions))
+    plt.scatter(implied_forces, predicted_forces, alpha=0.5)
+    min_val = min(min(implied_forces), min(predicted_forces))
+    max_val = max(max(implied_forces), max(predicted_forces))
     plt.plot([min_val, max_val], [min_val, max_val], 'r--', label='Perfect Prediction')
-    plt.xlabel("True Actions (N)")
-    plt.ylabel("Predicted Actions (N)")
-    plt.title("True vs Predicted Actions")
+    plt.xlabel("Implied Forces (N)")
+    plt.ylabel("Predicted Forces (N)")
+    plt.title("Implied vs Predicted Forces")
     plt.legend()
     plt.grid(True)
-    plt.savefig('media/true_vs_predicted_actions.png', dpi=300, bbox_inches='tight')
+    plt.savefig('media/implied_vs_predicted_forces.png', dpi=300, bbox_inches='tight')
     plt.close()
+    logger.info("Saved plot: media/implied_vs_predicted_forces.png")
 
-def plot_error_distribution(true_actions, predicted_actions):
-    errors = true_actions - predicted_actions
+def plot_error_distribution(implied_forces, predicted_forces):
+    logger.info("Plotting Force Prediction Error Distribution...")
+    errors = implied_forces - predicted_forces
     plt.figure(figsize=(10, 6))
     plt.hist(errors, bins=50, edgecolor='black')
     plt.xlabel("Prediction Error (N)")
     plt.ylabel("Frequency")
-    plt.title("Distribution of Prediction Errors")
+    plt.title("Distribution of Force Prediction Errors")
     plt.grid(True)
-    plt.savefig('media/error_distribution.png', dpi=300, bbox_inches='tight')
+    plt.savefig('media/force_error_distribution.png', dpi=300, bbox_inches='tight')
     plt.close()
+    logger.info("Saved plot: media/force_error_distribution.png")
 
-def plot_actions_vs_states(states, true_actions, predicted_actions):
+def plot_forces_vs_states(states, implied_forces, predicted_forces):
+    logger.info("Plotting Forces vs States...")
     fig, axs = plt.subplots(2, 2, figsize=(15, 10))
     state_labels = ['Cart Position (m)', 'Cart Velocity (m/s)', 'Pole Angle (rad)', 'Pole Angular Velocity (rad/s)']
     for i in range(4):
-        axs[i // 2, i % 2].scatter(states[:, i], true_actions, alpha=0.5, label='True', s=10)
-        axs[i // 2, i % 2].scatter(states[:, i], predicted_actions, alpha=0.5, label='Predicted', s=10)
+        axs[i // 2, i % 2].scatter(states[:, i], implied_forces, alpha=0.5, label='Implied', s=10)
+        axs[i // 2, i % 2].scatter(states[:, i], predicted_forces, alpha=0.5, label='Predicted', s=10)
         axs[i // 2, i % 2].set_xlabel(state_labels[i])
-        axs[i // 2, i % 2].set_ylabel('Action (N)')
+        axs[i // 2, i % 2].set_ylabel('Force (N)')
         axs[i // 2, i % 2].legend()
         axs[i // 2, i % 2].grid(True)
     plt.tight_layout()
-    plt.savefig('media/actions_vs_states.png', dpi=300, bbox_inches='tight')
+    plt.savefig('media/forces_vs_states.png', dpi=300, bbox_inches='tight')
     plt.close()
+    logger.info("Saved plot: media/forces_vs_states.png")

@@ -1,12 +1,24 @@
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
 import pandas as pd
 
+# Set up logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.StreamHandler(),
+                        logging.FileHandler('visualization.log')
+                    ])
+
+logger = logging.getLogger(__name__)
+
 def create_animation(obs, max_steps, visualize):
     if not visualize:
         return None
 
+    logger.info("Creating animation for visualization.")
     fig, ax = plt.subplots()
     cart_plot, = plt.plot([], [], 's-', markersize=20)  # Cart
     pend_plot, = plt.plot([], [], 'o-', markersize=10)  # Pendulum
@@ -23,7 +35,7 @@ def create_animation(obs, max_steps, visualize):
 
     def update(frame):
         x = obs[0]  # Cart position
-        theta = obs[2] - np.pi # Pendulum angle
+        theta = obs[2] - np.pi  # Pendulum angle
 
         cart_plot.set_data([x], [0])
         pend_x = x + np.sin(theta)
@@ -37,12 +49,14 @@ def create_animation(obs, max_steps, visualize):
 
 def plot_trajectory(states, actions, rewards, visualize):
     if visualize:
+        logger.info("Plotting trajectory.")
         plt.pause(0.05)  # Pause for the animation to update
 
     return states, actions, rewards
 
 
 def visualize_csv_data(file_path):
+    logger.info(f"Visualizing data from CSV file: {file_path}")
     df = pd.read_csv(file_path, sep=';')
     cart_pos = df['cartPos'].values
     pend_pos = df['pendPos'].values

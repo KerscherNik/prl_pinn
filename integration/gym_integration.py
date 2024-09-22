@@ -1,10 +1,22 @@
 import gymnasium as gym
 import torch
 import numpy as np
+import logging
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.StreamHandler(),
+                        logging.FileHandler('app.log')
+                    ])
+
+logger = logging.getLogger(__name__)
 
 class PINNCartPoleEnv(gym.Env):
     def __init__(self, pinn_model, params):
         super(PINNCartPoleEnv, self).__init__()
+        logger.info("Initializing the PINN CartPole environment.")
+
         self.pinn_model = pinn_model
         self.params = params
         
@@ -15,13 +27,11 @@ class PINNCartPoleEnv(gym.Env):
         self.length = params['l']
         self.polemass_length = self.masspole * self.length
         self.force_mag = params['force_mag']
-        self.tau = 0.02  # seconds between state updates
+        self.tau = params['tau']
 
-        # Angle at which to fail the episode
         self.theta_threshold_radians = 12 * 2 * np.pi / 360
         self.x_threshold = 2.4
 
-        # Define threshold for cart position, cart velocity, pole angle, pole angular velocity
         high = np.array([
             self.x_threshold * 2,
             np.finfo(np.float32).max,
@@ -39,10 +49,10 @@ class PINNCartPoleEnv(gym.Env):
     def step(self, action):
         err_msg = f"{action!r} ({type(action)}) invalid"
         assert self.action_space.contains(action), err_msg
+        logger.debug(f"Action received: {action}")
 
         x, x_dot, theta, theta_dot = self.state
 
-        # Update sequence buffer
         new_state = torch.tensor([x, x_dot, theta, theta_dot, float(action)], 
                                  dtype=torch.float32, 
                                  device=self.pinn_model.device).unsqueeze(0).unsqueeze(0)
@@ -51,10 +61,9 @@ class PINNCartPoleEnv(gym.Env):
         else:
             self.sequence_buffer = torch.cat([self.sequence_buffer[:, 1:, :], new_state], dim=1)
 
-        # Get force from PINN
         with torch.no_grad():
             force = self.pinn_model(self.sequence_buffer)
-            force = force.item() * self.params['force_mag']
+            force = force.item() * self.force_mag  # Scale the force if necessary
 
         costheta = np.cos(theta)
         sintheta = np.sin(theta)
@@ -80,20 +89,16 @@ class PINNCartPoleEnv(gym.Env):
         if not done:
             reward = 1.0
         elif self.steps_beyond_done is None:
-            # Pole just fell!
             self.steps_beyond_done = 0
             reward = 1.0
+            logger.debug("Pole just fell! Steps beyond done set to 0.")
         else:
             if self.steps_beyond_done == 0:
-                gym.logger.warn(
-                    "You are calling 'step()' even though this "
-                    "environment has already returned done = True. You "
-                    "should always call 'reset()' once you receive 'done = "
-                    "True' -- any further steps are undefined behavior."
-                )
+                logger.warning("Calling 'step()' even though environment is done.")
             self.steps_beyond_done += 1
             reward = 0.0
 
+        logger.debug(f"State updated to: {self.state}, reward: {reward}, done: {done}")
         return np.array(self.state, dtype=np.float32), reward, done, False, {"predicted_force": force}
 
     def reset(self, *, seed=None, options=None):
@@ -101,4 +106,8 @@ class PINNCartPoleEnv(gym.Env):
         self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,))
         self.steps_beyond_done = None
         self.sequence_buffer = None
+        logger.debug("Environment reset.")
         return np.array(self.state, dtype=np.float32), {}
+
+    def render(self):
+        pass  # Implement rendering if needed

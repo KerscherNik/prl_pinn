@@ -1,3 +1,4 @@
+import logging
 import torch
 from tqdm import tqdm
 from ray import tune
@@ -7,11 +8,21 @@ from ray.tune.schedulers import ASHAScheduler
 from model.pinn_model import CartpolePINN
 from model.loss_functions import pinn_loss
 
-def train_pinn(model, train_dataloader, optimizer, params, num_epochs, physics_weight, t_span=1.0):
+# Set up logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.StreamHandler(),
+                        logging.FileHandler('training.log')
+                    ])
+
+logger = logging.getLogger(__name__)
+
+def train_pinn(model, train_dataloader, optimizer, params, num_epochs, physics_weight, t_span=1.0, reg_weight=1e-5, predict_friction=False):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Training on {device}")
+    logger.info(f"Training on {device}")
     model.to(device)
-    print(f"Training for {num_epochs} epochs")
+    logger.info(f"Training for {num_epochs} epochs")
     
     epoch_pbar = tqdm(range(num_epochs), desc="Epochs", position=0)
     
@@ -26,22 +37,17 @@ def train_pinn(model, train_dataloader, optimizer, params, num_epochs, physics_w
             
             optimizer.zero_grad()
 
-            # Simulation progress bar
             sim_pbar = tqdm(total=100, desc="Simulation", position=2, leave=False)
-            
             def simulation_callback(t, state):
                 sim_pbar.update(int(t.item() / t_span * 100) - sim_pbar.n)
 
-            # Loss calculation progress bar
             loss_pbar = tqdm(total=100, desc="Loss Calculation", position=3, leave=False)
-
             def loss_calculation_callback(progress):
                 loss_pbar.update(int(progress * 100) - loss_pbar.n)
 
             loss, mse_loss, physics_loss = pinn_loss(
-                model, sequences, targets, params, physics_weight, t_span=t_span,
-                simulation_callback=simulation_callback,
-                loss_calculation_callback=loss_calculation_callback
+                model, sequences, targets, params, physics_weight, t_span=t_span, reg_weight=reg_weight, predict_friction=predict_friction,
+                simulation_callback=simulation_callback, loss_calculation_callback=loss_calculation_callback
             )
 
             sim_pbar.close()
@@ -72,9 +78,9 @@ def train_pinn(model, train_dataloader, optimizer, params, num_epochs, physics_w
             'avg_physics': f'{avg_physics:.4f}'
         })
 
-        print(f"\nEpoch [{epoch+1}/{num_epochs}]")
-        print(f"Average Loss: {avg_loss:.4f}")
-        print(f"MSE Loss: {avg_mse:.4f}, Physics Loss: {avg_physics:.4f}")
+        logger.info(f"\nEpoch [{epoch+1}/{num_epochs}]")
+        logger.info(f"Average Loss: {avg_loss:.4f}")
+        logger.info(f"MSE Loss: {avg_mse:.4f}, Physics Loss: {avg_physics:.4f}")
 
     return model, avg_loss
 
@@ -90,7 +96,7 @@ def objective(config, train_dataloader, test_dataloader, params, predict_frictio
     
     for epoch in range(config["num_epochs"]):
         model, avg_train_loss = train_pinn(
-            model, train_dataloader, optimizer, params, 1, config["physics_weight"], t_span=1.0
+            model, train_dataloader, optimizer, params, 1, config["physics_weight"], t_span=1.0, reg_weight=config["reg_weight"]
         )
         scheduler.step(avg_train_loss)
         
@@ -101,7 +107,7 @@ def objective(config, train_dataloader, test_dataloader, params, predict_frictio
             for sequences, targets in test_dataloader:
                 sequences, targets = sequences.to(device), targets.to(device)
                 loss, _, _ = pinn_loss(
-                    model, sequences, targets, params, config["physics_weight"], t_span=1.0
+                    model, sequences, targets, params, config["physics_weight"], t_span=1.0, reg_weight=config["reg_weight"]
                 )
                 total_test_loss += loss.item()
         avg_test_loss = total_test_loss / len(test_dataloader)
@@ -113,7 +119,8 @@ def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_
     config = {
         "lr": tune.loguniform(1e-4, 1e-1),
         "num_epochs": tune.choice([50, 100, 200]),
-        "physics_weight": tune.uniform(0.1, 10.0)
+        "physics_weight": tune.uniform(0.1, 10.0),
+        "reg_weight": tune.loguniform(1e-6, 1e-4)
     }
 
     scheduler = ASHAScheduler(
@@ -125,9 +132,10 @@ def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_
     )
 
     reporter = CLIReporter(
-        parameter_columns=["lr", "num_epochs", "physics_weight"],
+        parameter_columns=["lr", "num_epochs", "physics_weight", "reg_weight"],
         metric_columns=["train_loss", "test_loss", "training_iteration"]
     )
+    
     # TODO: Uncomment this block to run hyperparameter optimization
     """ result = tune.run(
         tune.with_parameters(
@@ -147,14 +155,15 @@ def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_
     #best_trial = result.get_best_trial("test_loss", "min", "last")
     best_trial = None
     if best_trial is None:
-        print("Warning: Could not find best trial. Using default configuration.")
+        logger.warning("Warning: Could not find best trial. Using default configuration.")
         return {
             "lr": 1e-3,
-            "num_epochs": 10,
-            "physics_weight": 1.0
+            "num_epochs": 100,
+            "physics_weight": 1.0,
+            "reg_weight": 1e-5
         }
     else:
-        print(f"Best trial config: {best_trial.config}")
-        print(f"Best trial final train loss: {best_trial.last_result['train_loss']}")
-        print(f"Best trial final test loss: {best_trial.last_result['test_loss']}")
+        logger.info(f"Best trial config: {best_trial.config}")
+        logger.info(f"Best trial final train loss: {best_trial.last_result['train_loss']}")
+        logger.info(f"Best trial final test loss: {best_trial.last_result['test_loss']}")
         return best_trial.config
