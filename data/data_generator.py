@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 env = gym.make('CartPole-v1')
 data = []
 
-num_episodes = 10
+num_episodes = 500
 
 logger.info("Starting data collection for %d episodes of CartPole.", num_episodes)
 
