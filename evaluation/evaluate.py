@@ -22,6 +22,7 @@ def evaluate_pinn(model, dataloader, params, scaler, predict_friction=False):
     model.to(device)
     
     predicted_forces = []
+    scaled_forces = []
     states = []
     next_states = []
     total_mse_loss = 0
@@ -35,24 +36,26 @@ def evaluate_pinn(model, dataloader, params, scaler, predict_friction=False):
             sequences, targets = sequences.to(device), targets.to(device)
 
             predicted_force = model(sequences)
+            scaled_force = predicted_force * params['force_mag']
             
-            # Calculate losses
             loss, mse, physics_loss = pinn_loss(model, sequences, targets, params, predict_friction=predict_friction)
             total_mse_loss += mse.item()
             total_physics_loss += physics_loss.item()
             
-            current_state = sequences[:, -1, :4]  # Last state in the sequence
-            next_state = targets[:, :4]  # Next state
+            current_state = sequences[:, -1, :4]
+            next_state = targets[:, :4]
 
             predicted_forces.extend(predicted_force.cpu().numpy())
+            scaled_forces.extend(scaled_force.cpu().numpy())
             states.extend(current_state.cpu().numpy())
             next_states.extend(next_state.cpu().numpy())
 
     predicted_forces = np.array(predicted_forces)
+    scaled_forces = np.array(scaled_forces)
     states = np.array(states)
     next_states = np.array(next_states)
 
-    states_inv = scaler.inverse_transform(states)  # Transform only the state values, not actions
+    states_inv = scaler.inverse_transform(states)
     next_states_inv = scaler.inverse_transform(next_states)
 
     logger.debug("Head of states (inversed):\n%s", states_inv[:5])
@@ -62,9 +65,9 @@ def evaluate_pinn(model, dataloader, params, scaler, predict_friction=False):
     implied_forces = calculate_implied_forces(states_inv, next_states_inv, params)
 
     # Evaluate the model's predictions
-    mse = mean_squared_error(implied_forces, predicted_forces)
-    r2 = r2_score(implied_forces, predicted_forces)
-    relative_error = np.abs(implied_forces - predicted_forces) / (np.abs(implied_forces) + 1e-8)
+    mse = mean_squared_error(implied_forces, scaled_forces)
+    r2 = r2_score(implied_forces, scaled_forces)
+    relative_error = np.abs(implied_forces - scaled_forces) / (np.abs(implied_forces) + 1e-8)
     mean_relative_error = np.mean(relative_error)
 
     # Calculate average losses
@@ -78,9 +81,9 @@ def evaluate_pinn(model, dataloader, params, scaler, predict_friction=False):
     logger.info(f"Mean Relative Error: {mean_relative_error:.4f}")
 
     # Plotting
-    plot_true_vs_predicted(implied_forces, predicted_forces)
-    plot_error_distribution(implied_forces, predicted_forces)
-    plot_forces_vs_states(states_inv, implied_forces, predicted_forces)
+    plot_true_vs_predicted(implied_forces, scaled_forces)
+    plot_error_distribution(implied_forces, scaled_forces)
+    plot_forces_vs_states(states_inv, implied_forces, scaled_forces)
 
     return mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error
 
