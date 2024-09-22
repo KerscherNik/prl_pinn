@@ -16,6 +16,7 @@ The CartPole system consists of a pendulum attached to a cart moving along a fri
 - Physics-informed loss function incorporating known differential equations
 - Hyperparameter optimization using Ray Tune
 - Integration with OpenAI Gym for reinforcement learning applications
+- Visulization of original and integrated gym environment side-by-side using the compare_envs_interactively script (call with python -m integration.compare_envs_interactively)
 
 ## Physical Model
 
@@ -45,12 +46,20 @@ class CartpolePINN(nn.Module):
         super().__init__()
         self.predict_friction = predict_friction
         
+        self.lstm = nn.LSTM(input_size=5, hidden_size=128, num_layers=2, batch_first=True)
+
         self.network = nn.Sequential(
-            nn.Linear(5, 64),
-            nn.Tanh(),
-            nn.Linear(64, 64),
-            nn.Tanh(),
-            nn.Linear(64, 3 if predict_friction else 1)
+            nn.Linear(128, 512),
+            nn.SiLU(),
+            nn.LayerNorm(512),
+            nn.Dropout(0.2),
+            nn.Linear(512, 512),
+            nn.SiLU(),
+            nn.LayerNorm(512),
+            nn.Linear(512, 256),
+            nn.SiLU(),
+            nn.LayerNorm(256),
+            nn.Linear(256, 128)
         )
 ```
 
