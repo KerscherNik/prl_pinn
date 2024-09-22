@@ -1,5 +1,4 @@
 from data.data_loader import get_dataloaders
-from integration.compare_envs_interactively import visualize_interactive
 from integration.gym_integration import PINNCartPoleEnv
 from model.pinn_model import CartpolePINN
 from training.train_utils import train_pinn, optimize_hyperparameters
@@ -80,11 +79,6 @@ def main():
         saved_model_path = f'model_archive/trained_pinn_model_without_friction_20240922_183400.pth'
         loaded_model = CartpolePINN(sequence_length, predict_friction=predict_friction)
         loaded_model.load_state_dict(torch.load(saved_model_path, weights_only=True))
-       
-        # visualize interactively: uncomment only this block and the block above to load the pinn model
-        #original_env = Monitor(gym.make('CartPole-v1'))
-        #pinn_env = Monitor(PINNCartPoleEnv(loaded_model, params))
-        #visualize_interactive(pinn_env, original_env, max_steps=500, visualize=True, slow_motion_factor=3)
 
 
         # Evaluate model
@@ -100,11 +94,6 @@ def main():
         logger.info(f"Avg Physics Loss: {avg_physics_loss:.4f}")
         logger.info(f"Mean Relative Error: {mean_relative_error:.4f}")
         logger.info("\n" + "="*50 + "\n")
-
-
-    # Compare environments
-    #rewards_orig, rewards_pinn_with_friction = compare_environments(models[True], params, True)
-    #rewards_orig, rewards_pinn_without_friction = compare_environments(models[False], params, False)
 
     """
     # Load the trained model

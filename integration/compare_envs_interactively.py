@@ -246,6 +246,8 @@ def visualize_side_by_side(env1, env2, ppo_model=None, max_steps=500, slow_motio
     pygame.quit()
 
 if __name__ == "__main__":
+    # Execute this script to visualize the side-by-side comparison of the original CartPole environment and the PINN-based CartPole environment
+    # Use python -m integration.compare_envs_interactively to run this script
     logger.info("Starting side-by-side CartPole visualization.")
 
     sequence_length = 5
