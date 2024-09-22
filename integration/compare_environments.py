@@ -84,7 +84,7 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     # Train a policy on the original environment
     logger.info("Training PPO agent on the original CartPole environment.")
     ppo_model = PPO('MlpPolicy', original_env, verbose=1, device=device)
-    ppo_model.learn(total_timesteps=5000)
+    ppo_model.learn(total_timesteps=50000)
 
     # Evaluate on both environments
     original_mean, original_std = evaluate_env(original_env, ppo_model, num_episodes)

@@ -54,7 +54,7 @@ def main():
 
     models = {}
     for predict_friction in [False]:
-        logger.info(f"{'With' if predict_friction else 'Without'} friction prediction:")
+        """ logger.info(f"{'With' if predict_friction else 'Without'} friction prediction:")
 
         # Hyperparameter optimization
         logger.info("Starting hyperparameter optimization...")
@@ -73,13 +73,13 @@ def main():
         logger.info("Saving model...")
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         torch.save(trained_model.state_dict(), f'model_archive/trained_pinn_model_{"with" if predict_friction else "without"}_friction_{timestamp}.pth')
-        logger.info(f"Model saved under name: trained_pinn_model_{'with' if predict_friction else 'without'}_friction_{timestamp}.pth")
+        logger.info(f"Model saved under name: trained_pinn_model_{'with' if predict_friction else 'without'}_friction_{timestamp}.pth") """
         
         # Uncomment this block to load a saved model and evaluate it directly. Make sure to comment out previous training block and hyperparameter optimization block. At evaluate_pinn use the loaded model instead of trained_model.
         # Load the already saved model
-        """ saved_model_path = f'model_archive/trained_pinn_model_without_friction_20240922_033729.pth'
+        saved_model_path = f'model_archive/trained_pinn_model_without_friction_20240922_183400.pth'
         loaded_model = CartpolePINN(sequence_length, predict_friction=predict_friction)
-        loaded_model.load_state_dict(torch.load(saved_model_path, weights_only=True)) """
+        loaded_model.load_state_dict(torch.load(saved_model_path, weights_only=True))
        
         # visualize interactively: uncomment only this block and the block above to load the pinn model
         #original_env = Monitor(gym.make('CartPole-v1'))
@@ -88,10 +88,10 @@ def main():
 
 
         # Evaluate model
-        logger.info("Evaluating model...")
-        mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(trained_model, test_dataloader, params, scaler, predict_friction)
         """ logger.info("Evaluating model...")
-        mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(loaded_model, test_dataloader, params, scaler, predict_friction) #TODO: trained_model """
+        mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(trained_model, test_dataloader, params, scaler, predict_friction) #TODO: trained_model """
+        logger.info("Evaluating model...")
+        mse, r2, avg_mse_loss, avg_physics_loss, mean_relative_error = evaluate_pinn(loaded_model, test_dataloader, params, scaler, predict_friction) #TODO: trained_model
 
         logger.info(f"Results for {'with' if predict_friction else 'without'} friction prediction:")
         logger.info(f"MSE: {mse:.4f}")
@@ -114,8 +114,7 @@ def main():
 
     # Compare environments
     logger.info("Comparing CartPole environments...")
-    rewards_orig, rewards_pinn_without_friction = compare_environments(trained_model, params, False)
-    """ rewards_orig, rewards_pinn_without_friction = compare_environments(loaded_model, params, False) #TODO: trained_model """
+    rewards_orig, rewards_pinn_without_friction = compare_environments(loaded_model, params, False)
 
 
     logger.info("Average reward (Original): {:.2f}".format(sum(rewards_orig) / len(rewards_orig)))
