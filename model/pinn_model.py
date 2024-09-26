@@ -3,6 +3,7 @@ import torch.nn as nn
 from model.physics_helpers import calculate_theta_ddot, calculate_x_ddot
 from torchdiffeq import odeint
 import logging
+import traceback
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -56,30 +57,54 @@ class CartpolePINN(nn.Module):
 
     def forward(self, sequence):
         batch_size, seq_len, features = sequence.shape
-        logger.debug("Forward pass with batch size: %d, sequence length: %d, features: %d", batch_size, seq_len, features)
+        logger.debug(f"Forward pass input: batch_size={batch_size}, seq_len={seq_len}, features={features}")
+        logger.debug(f"Input sequence: {sequence}")
         
         # Process the sequence with LSTM
-        lstm_out, _ = self.lstm(sequence)
-        logger.debug("LSTM output shape: %s", lstm_out.shape)
+        try:
+            lstm_out, _ = self.lstm(sequence)
+            logger.debug(f"LSTM output shape: {lstm_out.shape}")
+            logger.debug(f"LSTM output: {lstm_out}")
+        except Exception as e:
+            logger.error(f"Error in LSTM processing: {e}")
+            logger.error(traceback.format_exc())
+            raise
         
         # Take the final output from the LSTM (many-to-one)
         lstm_out = lstm_out[:, -1, :]  # Shape: (batch_size, 128)
+        logger.debug(f"Final LSTM output: {lstm_out}")
         
         # Pass through the feedforward network
-        residual = lstm_out
-        x = self.network(lstm_out)
-        x += residual  # Add skip connection for better gradient flow
+        try:
+            residual = lstm_out
+            x = self.network(lstm_out)
+            x += residual  # Add skip connection for better gradient flow
+            logger.debug(f"Feedforward network output: {x}")
+        except Exception as e:
+            logger.error(f"Error in feedforward network: {e}")
+            logger.error(traceback.format_exc())
+            raise
         
         if self.predict_friction:
-            force = self.force_output(x).squeeze(-1)
-            friction_params = self.friction_output(x)
-            mu_c, mu_p = friction_params[:, 0], friction_params[:, 1]
-            logger.debug("Predicted force: %s, mu_c: %s, mu_p: %s", force, mu_c, mu_p)
-            return force, mu_c, mu_p
+            try:
+                force = self.force_output(x).squeeze(-1)
+                friction_params = self.friction_output(x)
+                mu_c, mu_p = friction_params[:, 0], friction_params[:, 1]
+                logger.debug(f"Predicted force: {force}, mu_c: {mu_c}, mu_p: {mu_p}")
+                return force, mu_c, mu_p
+            except Exception as e:
+                logger.error(f"Error in friction prediction: {e}")
+                logger.error(traceback.format_exc())
+                raise
         else:
-            force = self.output_layer(x).squeeze(-1)
-            logger.debug("Predicted force: %s", force)
-            return force
+            try:
+                force = self.output_layer(x).squeeze(-1)
+                logger.debug(f"Predicted force: {force}")
+                return force
+            except Exception as e:
+                logger.error(f"Error in force prediction: {e}")
+                logger.error(traceback.format_exc())
+                raise
 
     def dynamics(self, t, state, F, params):
         x, x_dot, theta, theta_dot = state

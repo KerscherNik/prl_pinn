@@ -54,5 +54,6 @@ def pinn_loss(model, sequences, targets, params, physics_weight=1.0, t_span=1.0,
     
     # Combine losses: MSE + weighted physics loss + regularization
     total_loss = avg_mse_loss + physics_weight * avg_physics_loss + reg_weight * l2_reg
+    total_loss = physics_weight * avg_physics_loss + reg_weight * l2_reg
 
     return total_loss, avg_mse_loss, avg_physics_loss

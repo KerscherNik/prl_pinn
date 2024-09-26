@@ -9,8 +9,9 @@ from integration.gym_integration import PINNCartPoleEnv
 from model.pinn_model import CartpolePINN
 from visualization.visualization import create_animation, plot_trajectory
 import logging
+from tqdm import tqdm
 
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     handlers=[
                         logging.StreamHandler(),  # Output to console
@@ -21,35 +22,34 @@ logger = logging.getLogger(__name__)
 
 def evaluate_env(env, model, num_episodes=100):
     """
-    Evaluate the policy on a given environment.
-    
-    Args:
-    env (gym.Env): The environment to evaluate on.
-    model (stable_baselines3.BaseAlgorithm): The trained model to evaluate.
-    num_episodes (int): Number of episodes to run for evaluation.
-    
-    Returns:
-    tuple: Mean and standard deviation of rewards.
+    Evaluate the policy on a given environment with a progress bar.
     """
     logger.info(f"Evaluating environment with {num_episodes} episodes.")
-    mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=num_episodes)
+    rewards = []
+    with tqdm(total=num_episodes, desc="Evaluating") as pbar:
+        for _ in range(num_episodes):
+            obs, _ = env.reset()
+            done = False
+            episode_reward = 0
+            while not done:
+                action, _ = model.predict(obs, deterministic=True)
+                obs, reward, terminated, truncated, _ = env.step(action)
+                episode_reward += reward
+                done = terminated or truncated
+            rewards.append(episode_reward)
+            pbar.update(1)
+    
+    mean_reward = np.mean(rewards)
+    std_reward = np.std(rewards)
     return mean_reward, std_reward
 
 def collect_trajectory(env, model, max_steps=500, visualize=False):
     """
     Collect trajectory (states, actions, rewards) of the policy in a given environment.
-    
-    Args:
-    env (gym.Env): The environment to collect trajectory from.
-    model (stable_baselines3.BaseAlgorithm): The trained model to use for action prediction.
-    max_steps (int): Maximum number of steps to run the environment.
-    visualize (bool): Whether to visualize the trajectory.
-    
-    Returns:
-    tuple: Numpy arrays of states, actions, and rewards.
     """
     obs, _ = env.reset()
     states, actions, rewards, predicted_forces = [], [], [], []
+    predicted_mu_c, predicted_mu_p = [], []
 
     animation = create_animation(obs, max_steps, visualize)
 
@@ -62,6 +62,10 @@ def collect_trajectory(env, model, max_steps=500, visualize=False):
 
         if "predicted_force" in info:
             predicted_forces.append(info["predicted_force"])
+        if "predicted_mu_c" in info:
+            predicted_mu_c.append(info["predicted_mu_c"])
+        if "predicted_mu_p" in info:
+            predicted_mu_p.append(info["predicted_mu_p"])
 
         plot_trajectory(states, actions, rewards, visualize)
 
@@ -70,35 +74,69 @@ def collect_trajectory(env, model, max_steps=500, visualize=False):
             break
 
     logger.debug(f"Trajectory collected: {len(states)} states, {len(actions)} actions.")
-    return (np.array(states), np.array(actions), np.array(rewards), np.array(predicted_forces) if predicted_forces else None)
+    return (np.array(states), np.array(actions), np.array(rewards), 
+            np.array(predicted_forces) if predicted_forces else None,
+            np.array(predicted_mu_c) if predicted_mu_c else None,
+            np.array(predicted_mu_p) if predicted_mu_p else None)
+
+def plot_timeline(time_steps, forces, mu_c, mu_p, save_folder_name):
+    """
+    Plot a timeline of predicted forces and friction parameters.
+    """
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
+
+    # Plot forces
+    ax1.plot(time_steps, forces, label='Predicted Force')
+    ax1.set_ylabel('Force')
+    ax1.set_title('Timeline of Predicted Force')
+    ax1.legend()
+    ax1.grid(True)
+
+    # Plot friction parameters
+    if mu_c is not None and mu_p is not None:
+        ax2.plot(time_steps, mu_c, label='Predicted μ_c')
+        ax2.plot(time_steps, mu_p, label='Predicted μ_p')
+        ax2.set_ylabel('Friction Coefficient')
+        ax2.set_title('Timeline of Predicted Friction Parameters')
+        ax2.legend()
+        ax2.grid(True)
+
+    plt.xlabel('Time Steps')
+    plt.tight_layout()
+    plt.savefig(f'media/{save_folder_name}/timeline_plot.png')
+    plt.close()
 
 def compare_environments(pinn_model, params, predict_friction=False, num_episodes=100, max_steps=500, visualize=False, save_folder_name=""):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pinn_model = pinn_model.to(device)
 
     logger.info("Setting up environments for comparison.")
-    # Create environments with Monitor wrapper
     original_env = Monitor(gym.make('CartPole-v1'))
     pinn_env = Monitor(PINNCartPoleEnv(pinn_model, params))
 
-    # Train a policy on the original environment
-    total_timesteps_ppo = 50000
+    total_timesteps_ppo = 10000
     logger.info(f"Training PPO agent on the original CartPole environment for {total_timesteps_ppo} total timesteps.")
     
     ppo_model = PPO('MlpPolicy', original_env, verbose=1, device=device)
     ppo_model.learn(total_timesteps=total_timesteps_ppo)
 
-    # Evaluate on both environments
+    # Evaluate on both environments with progress bars
+    logger.info("Evaluating on original environment:")
     original_mean, original_std = evaluate_env(original_env, ppo_model, num_episodes)
     logger.info(f"Original environment - Mean reward: {original_mean:.2f} +/- {original_std:.2f}")
 
+    logger.info("Evaluating on PINN environment:")
     pinn_mean, pinn_std = evaluate_env(pinn_env, ppo_model, num_episodes)
     logger.info(f"PINN environment - Mean reward: {pinn_mean:.2f} +/- {pinn_std:.2f}")
 
     # Collect trajectories
     logger.info("Collecting trajectories from both environments.")
-    original_states, original_actions, original_rewards, _ = collect_trajectory(original_env, ppo_model, max_steps, visualize)
-    pinn_states, pinn_actions, pinn_rewards, pinn_forces = collect_trajectory(pinn_env, ppo_model, max_steps, visualize)
+    original_states, original_actions, original_rewards, _, _, _ = collect_trajectory(original_env, ppo_model, max_steps, visualize)
+    pinn_states, pinn_actions, pinn_rewards, pinn_forces, pinn_mu_c, pinn_mu_p = collect_trajectory(pinn_env, ppo_model, max_steps, visualize)
+
+    # Plot timeline
+    time_steps = np.arange(len(pinn_forces))
+    plot_timeline(time_steps, pinn_forces, pinn_mu_c, pinn_mu_p, save_folder_name)
 
     # Plot state comparisons
     logger.info("Plotting state comparisons.")
@@ -179,11 +217,11 @@ if __name__ == "__main__":
     logger.info("Comparing environments with preloaded trained model...")
     # Load your trained PINN model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    predict_friction = True  # Set this to True when using a model that predicts friction
+    predict_friction = False  # Set this to True when using a model that predicts friction
     save_folder_name = "with_friction" if predict_friction else "without_friction"
     pinn_model = CartpolePINN(predict_friction=predict_friction, sequence_length=10)
     try:
-        pinn_model.load_state_dict(torch.load('../model_archive/trained_pinn_model_with_friction_20240922_183400.pth', map_location=device))
+        pinn_model.load_state_dict(torch.load('model_archive/without_friction/trained_pinn_model_without_friction_20240926_145523.pth', map_location=device))
         logger.info("Successfully loaded trained model.")
     except Exception as e:
         logger.error(f"Error loading model: {e}")
@@ -198,7 +236,9 @@ if __name__ == "__main__":
         "g": 9.8,
         "mu_c": 0.0,
         "mu_p": 0.0,
-        "force_mag": 10.0
+        "force_mag": 10.0,
+        "tau" : 0.02
     }
+    
 
     compare_environments(pinn_model, params, predict_friction=True, num_episodes=100, max_steps=500, visualize=False, save_folder_name=save_folder_name)

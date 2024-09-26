@@ -4,6 +4,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from model.pinn_model import CartpolePINN
 import logging
+import traceback
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -58,39 +59,56 @@ class PINNCartPoleEnv(gym.Env):
     def step(self, action):
         err_msg = f"{action!r} ({type(action)}) invalid"
         assert self.action_space.contains(action), err_msg
-        logger.debug(f"Action received: {action}")
+        logger.debug(f"Step called with action: {action}")
 
         x, x_dot, theta, theta_dot = self.state
         force = self.force_mag if action == 1 else -self.force_mag
+        logger.debug(f"Current state: x={x}, x_dot={x_dot}, theta={theta}, theta_dot={theta_dot}")
+        logger.debug(f"Applied force: {force}")
 
         # Prepare input for PINN model
         new_state = torch.tensor([x, x_dot, theta, theta_dot, float(action)], 
                                  dtype=torch.float32, 
                                  device=self.pinn_model.device).unsqueeze(0).unsqueeze(0)
+        logger.debug(f"Prepared new state tensor: {new_state}")
+
         if self.sequence_buffer is None:
             self.sequence_buffer = new_state.repeat(1, self.sequence_length, 1)
+            logger.debug("Initialized sequence buffer")
         else:
             self.sequence_buffer = torch.cat([self.sequence_buffer[:, 1:, :], new_state], dim=1)
+            logger.debug("Updated sequence buffer")
+
+        logger.debug(f"Sequence buffer shape: {self.sequence_buffer.shape}")
 
         # Predict force using PINN
-        with torch.no_grad():
-            if self.predict_friction:
-                predicted_force, mu_c, mu_p = self.pinn_model(self.sequence_buffer)
-                predicted_force = predicted_force.item()
-                mu_c = mu_c.item()
-                mu_p = mu_p.item()
-            else:
-                predicted_force = self.pinn_model(self.sequence_buffer).item()
-                mu_c, mu_p = self.params['mu_c'], self.params['mu_p']
+        try:
+            with torch.no_grad():
+                if self.predict_friction:
+                    predicted_force, mu_c, mu_p = self.pinn_model(self.sequence_buffer)
+                    predicted_force = predicted_force.item()
+                    mu_c = mu_c.item()
+                    mu_p = mu_p.item()
+                    logger.debug(f"PINN prediction: force={predicted_force}, mu_c={mu_c}, mu_p={mu_p}")
+                else:
+                    predicted_force = self.pinn_model(self.sequence_buffer).item()
+                    mu_c, mu_p = self.params['mu_c'], self.params['mu_p']
+                    logger.debug(f"PINN prediction: force={predicted_force}")
+        except Exception as e:
+            logger.error(f"Error during PINN prediction: {e}")
+            logger.error(traceback.format_exc())
+            raise
 
         # Scale the predicted force to match the original environment
         scaled_force = predicted_force * self.force_mag
+        logger.debug(f"Scaled force: {scaled_force}")
 
         # Update params with predicted friction if applicable
         current_params = self.params.copy()
         if self.predict_friction:
             current_params['mu_c'] = mu_c
             current_params['mu_p'] = mu_p
+            logger.debug(f"Updated params with predicted friction: mu_c={mu_c}, mu_p={mu_p}")
 
         # Use scaled force for state estimation
         def cartpole_ode(t, y):
@@ -105,10 +123,17 @@ class PINNCartPoleEnv(gym.Env):
             return [x_dot, xacc, theta_dot, thetaacc]
 
         # Solve ODE to get next state
-        sol = solve_ivp(cartpole_ode, [0, self.tau], [x, x_dot, theta, theta_dot], method='RK45')
-        self.state = sol.y[:, -1]
+        try:
+            sol = solve_ivp(cartpole_ode, [0, self.tau], [x, x_dot, theta, theta_dot], method='RK45')
+            self.state = sol.y[:, -1]
+            logger.debug(f"ODE solution: {sol.y[:, -1]}")
+        except Exception as e:
+            logger.error(f"Error during ODE solution: {e}")
+            logger.error(traceback.format_exc())
+            raise
 
         x, x_dot, theta, theta_dot = self.state
+        logger.debug(f"New state: x={x}, x_dot={x_dot}, theta={theta}, theta_dot={theta_dot}")
 
         done = bool(
             x < -self.x_threshold
@@ -116,6 +141,7 @@ class PINNCartPoleEnv(gym.Env):
             or theta < -self.theta_threshold_radians
             or theta > self.theta_threshold_radians
         )
+        logger.debug(f"Done: {done}")
 
         if not done:
             reward = 1.0
@@ -129,8 +155,8 @@ class PINNCartPoleEnv(gym.Env):
             self.steps_beyond_done += 1
             reward = 0.0
 
-        logger.debug(f"State updated to: {self.state}, reward: {reward}, done: {done}")
-        
+        logger.debug(f"Reward: {reward}")
+
         if self.render_mode == "human":
             self.render()
         
@@ -144,6 +170,7 @@ class PINNCartPoleEnv(gym.Env):
             info["predicted_mu_p"] = mu_p
         
         self.info = info
+        logger.debug(f"Step completed. Info: {info}")
         return np.array(self.state, dtype=np.float32), reward, done, False, info
 
     def reset(self, seed=None, options=None):

@@ -162,7 +162,7 @@ def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_
         metric_columns=["train_loss", "test_loss", "training_iteration"]
     )
     
-    result = tune.run(
+    """ result = tune.run(
         tune.with_parameters(
             objective, 
             train_dataloader=train_dataloader, 
@@ -178,7 +178,8 @@ def optimize_hyperparameters(train_dataloader, test_dataloader, params, predict_
         log_to_file=("ray_stdout.log", "ray_stderr.log")  # Redirect stdout and stderr
     )
 
-    best_trial = result.get_best_trial("test_loss", "min", "last")
+    best_trial = result.get_best_trial("test_loss", "min", "last") """
+    best_trial = None
     
     if best_trial is None:
         logger.warning("Warning: Could not find best trial. Using default configuration.")
