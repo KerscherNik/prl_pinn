@@ -177,15 +177,14 @@ def compare_environments(pinn_model, params, predict_friction=False, num_episode
     logger.info("Setting up environments for comparison.")
     original_env = Monitor(gym.make('CartPole-v1'))
     pinn_env = Monitor(PINNCartPoleEnv(pinn_model, params))
-
-    model_path = f'integration/ppo_model_{current_time}'
+    total_timesteps_ppo = 5000
+    model_path = f'integration/ppo_model_{current_time}_{total_timesteps_ppo}'
     temp_model_path = f'integration/ppo_model_20241001_235054'
 
-    if os.path.exists("integration/ppo_model_20241001_235054.zip"):
+    if os.path.exists(temp_model_path+".zip"):
         logger.info(f"Loading existing PPO model from {temp_model_path}.")
         ppo_model = PPO.load(temp_model_path, env=original_env, device=device)
     else:
-        total_timesteps_ppo = 50000
         logger.info(f"Training PPO agent for {total_timesteps_ppo} timesteps.")
         ppo_model = PPO('MlpPolicy', original_env, verbose=1, device=device)
         ppo_model.learn(total_timesteps=total_timesteps_ppo)
