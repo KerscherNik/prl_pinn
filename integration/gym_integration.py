@@ -5,186 +5,229 @@ from scipy.integrate import solve_ivp
 from model.pinn_model import CartpolePINN
 import logging
 import traceback
+import time
+from typing import Optional
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     handlers=[
                         logging.StreamHandler(),
-                        logging.FileHandler('app.log')
+                        logging.FileHandler('gym_integration.log')
                     ])
 
 logger = logging.getLogger(__name__)
 
 class PINNCartPoleEnv(gym.Env):
-    def __init__(self, pinn_model, params, render_mode=None):
+    """
+    CartPole environment with PINN integration for force prediction.
+    Closely follows the original CartPole implementation while adding PINN capabilities.
+    """
+    metadata = {
+        "render_modes": ["human", "rgb_array"],
+        "render_fps": 50,
+    }
+
+    def __init__(self, pinn_model, params, render_mode: Optional[str] = None):
+        logger.debug("Initializing PINN CartPole environment")
         super(PINNCartPoleEnv, self).__init__()
-        logger.info("Initializing the PINN CartPole environment.")
-
-        self.pinn_model = pinn_model
-        self.params = params
-        self.predict_friction = isinstance(self.pinn_model, CartpolePINN) and self.pinn_model.predict_friction
         
+        self.pinn_model = pinn_model
+        self.render_mode = render_mode
+        
+        # Step counting
+        self.current_step = 0
+        self.max_episode_steps = 500  # Explicit step limit
+        
+        # Physical parameters
         self.gravity = 9.8
-        self.masscart = params['m_c']
-        self.masspole = params['m_p']
+        self.masscart = params.get('m_c', 1.0)
+        self.masspole = params.get('m_p', 0.1)
         self.total_mass = self.masspole + self.masscart
-        self.length = params['l']
+        self.length = params.get('l', 0.5)  # actually half the pole's length
         self.polemass_length = self.masspole * self.length
-        self.force_mag = params['force_mag']
-        self.tau = params['tau']
-
+        self.force_mag = params.get('force_mag', 10.0)
+        self.tau = params.get('tau', 0.02)  # seconds between state updates
+        
+        # Thresholds for episode termination
         self.theta_threshold_radians = 12 * 2 * np.pi / 360
         self.x_threshold = 2.4
 
+        # Spaces
         high = np.array([
             self.x_threshold * 2,
             np.finfo(np.float32).max,
             self.theta_threshold_radians * 2,
-            np.finfo(np.float32).max])
-
+            np.finfo(np.float32).max,
+        ], dtype=np.float32)
         self.action_space = gym.spaces.Discrete(2)
         self.observation_space = gym.spaces.Box(-high, high, dtype=np.float32)
 
-        self.state = None
-        self.steps_beyond_done = None
+        # PINN-specific attributes
         self.sequence_length = self.pinn_model.sequence_length
         self.sequence_buffer = None
+        self.predict_friction = hasattr(self.pinn_model, 'predict_friction') and self.pinn_model.predict_friction
 
-        self.render_mode = render_mode
+        # Rendering setup
         self.screen = None
         self.clock = None
         self.isopen = True
-        self.info = {}
+
+        # Episode tracking
+        self.steps_beyond_terminated = None
+        self.state = None
 
     def step(self, action):
+        logger.debug(f"Step {self.current_step} called with action: {action}")
         err_msg = f"{action!r} ({type(action)}) invalid"
         assert self.action_space.contains(action), err_msg
-        logger.debug(f"Step called with action: {action}")
+        assert self.state is not None, "Call reset before using step method."
 
+        # Increment step counter
+        self.current_step += 1
+        
+        # Check for step limit before processing action
+        if self.current_step >= self.max_episode_steps:
+            logger.debug(f"Episode truncated after {self.current_step} steps")
+            return (
+                np.array(self.state, dtype=np.float32),
+                1.0,  # Reward for truncated episode
+                False,  # terminated
+                True,  # truncated
+                {"episode_length": self.current_step}
+            )
+
+        # Prepare state for PINN
         x, x_dot, theta, theta_dot = self.state
-        force = self.force_mag if action == 1 else -self.force_mag
-        logger.debug(f"Current state: x={x}, x_dot={x_dot}, theta={theta}, theta_dot={theta_dot}")
-        logger.debug(f"Applied force: {force}")
-
-        # Prepare input for PINN model
-        new_state = torch.tensor([x, x_dot, theta, theta_dot, float(action)], 
-                                 dtype=torch.float32, 
-                                 device=self.pinn_model.device).unsqueeze(0).unsqueeze(0)
-        logger.debug(f"Prepared new state tensor: {new_state}")
-
-        if self.sequence_buffer is None:
-            self.sequence_buffer = new_state.repeat(1, self.sequence_length, 1)
-            logger.debug("Initialized sequence buffer")
-        else:
-            self.sequence_buffer = torch.cat([self.sequence_buffer[:, 1:, :], new_state], dim=1)
-            logger.debug("Updated sequence buffer")
-
-        logger.debug(f"Sequence buffer shape: {self.sequence_buffer.shape}")
-
-        # Predict force using PINN
         try:
+            new_state = torch.tensor([x, x_dot, theta, theta_dot, float(action)], 
+                                   dtype=torch.float32, 
+                                   device=self.pinn_model.device).unsqueeze(0).unsqueeze(0)
+
+            # Update sequence buffer
+            if self.sequence_buffer is None:
+                self.sequence_buffer = new_state.repeat(1, self.sequence_length, 1)
+            else:
+                self.sequence_buffer = torch.cat([self.sequence_buffer[:, 1:, :], new_state], dim=1)
+
+            # Get PINN predictions
             with torch.no_grad():
                 if self.predict_friction:
                     predicted_force, mu_c, mu_p = self.pinn_model(self.sequence_buffer)
-                    predicted_force = predicted_force.item()
-                    mu_c = mu_c.item()
-                    mu_p = mu_p.item()
-                    logger.debug(f"PINN prediction: force={predicted_force}, mu_c={mu_c}, mu_p={mu_p}")
+                    force = predicted_force.item() * self.force_mag
+                    logger.debug(f"PINN predictions: force={force:.4f}, mu_c={mu_c.item():.4f}, mu_p={mu_p.item():.4f}")
                 else:
-                    predicted_force = self.pinn_model(self.sequence_buffer).item()
-                    mu_c, mu_p = self.params['mu_c'], self.params['mu_p']
-                    logger.debug(f"PINN prediction: force={predicted_force}")
+                    predicted_force = self.pinn_model(self.sequence_buffer)
+                    force = predicted_force.item() * self.force_mag
+                    logger.debug(f"PINN prediction: force={force:.4f}")
         except Exception as e:
-            logger.error(f"Error during PINN prediction: {e}")
-            logger.error(traceback.format_exc())
-            raise
+            logger.error(f"Error during PINN prediction: {str(e)}")
+            # Return terminal state in case of PINN error
+            return (
+                np.array(self.state, dtype=np.float32),
+                0.0,
+                True,
+                False,
+                {"error": "PINN prediction failed"}
+            )
 
-        # Scale the predicted force to match the original environment
-        scaled_force = predicted_force * self.force_mag
-        logger.debug(f"Scaled force: {scaled_force}")
+        # Physics calculations
+        costheta = np.cos(theta)
+        sintheta = np.sin(theta)
 
-        # Update params with predicted friction if applicable
-        current_params = self.params.copy()
-        if self.predict_friction:
-            current_params['mu_c'] = mu_c
-            current_params['mu_p'] = mu_p
-            logger.debug(f"Updated params with predicted friction: mu_c={mu_c}, mu_p={mu_p}")
-
-        # Use scaled force for state estimation
-        def cartpole_ode(t, y):
-            x, x_dot, theta, theta_dot = y
-            costheta = np.cos(theta)
-            sintheta = np.sin(theta)
-
-            temp = (scaled_force + self.polemass_length * theta_dot**2 * sintheta) / self.total_mass
-            thetaacc = (self.gravity * sintheta - costheta * temp) / (self.length * (4.0/3.0 - self.masspole * costheta**2 / self.total_mass))
-            xacc = temp - self.polemass_length * thetaacc * costheta / self.total_mass
-
-            return [x_dot, xacc, theta_dot, thetaacc]
-
-        # Solve ODE to get next state
-        try:
-            sol = solve_ivp(cartpole_ode, [0, self.tau], [x, x_dot, theta, theta_dot], method='RK45')
-            self.state = sol.y[:, -1]
-            logger.debug(f"ODE solution: {sol.y[:, -1]}")
-        except Exception as e:
-            logger.error(f"Error during ODE solution: {e}")
-            logger.error(traceback.format_exc())
-            raise
-
-        x, x_dot, theta, theta_dot = self.state
-        logger.debug(f"New state: x={x}, x_dot={x_dot}, theta={theta}, theta_dot={theta_dot}")
-
-        done = bool(
-            x < -self.x_threshold
-            or x > self.x_threshold
-            or theta < -self.theta_threshold_radians
-            or theta > self.theta_threshold_radians
+        temp = (force + self.polemass_length * theta_dot**2 * sintheta) / self.total_mass
+        thetaacc = (self.gravity * sintheta - costheta * temp) / (
+            self.length * (4.0 / 3.0 - self.masspole * costheta**2 / self.total_mass)
         )
-        logger.debug(f"Done: {done}")
+        xacc = temp - self.polemass_length * thetaacc * costheta / self.total_mass
 
-        if not done:
+        # Euler integration
+        x = x + self.tau * x_dot
+        x_dot = x_dot + self.tau * xacc
+        theta = theta + self.tau * theta_dot
+        theta_dot = theta_dot + self.tau * thetaacc
+
+        self.state = (x, x_dot, theta, theta_dot)
+
+        # Detailed termination checking
+        termination_reason = None
+        if x < -self.x_threshold:
+            termination_reason = "x_position_left_threshold"
+            logger.debug(f"Episode TERMINATED: Cart position ({x:.3f}) < left threshold (-{self.x_threshold})")
+        elif x > self.x_threshold:
+            termination_reason = "x_position_right_threshold"
+            logger.debug(f"Episode TERMINATED: Cart position ({x:.3f}) > right threshold ({self.x_threshold})")
+        elif theta < -self.theta_threshold_radians:
+            termination_reason = "theta_below_threshold"
+            logger.debug(f"Episode TERMINATED: Pole angle ({theta:.3f} rad) < min threshold (-{self.theta_threshold_radians})")
+        elif theta > self.theta_threshold_radians:
+            termination_reason = "theta_above_threshold"
+            logger.debug(f"Episode TERMINATED: Pole angle ({theta:.3f} rad) > max threshold ({self.theta_threshold_radians})")
+        elif not np.isfinite(x):
+            termination_reason = "x_position_infinite"
+            logger.debug("Episode TERMINATED: Cart position is infinite")
+        elif not np.isfinite(x_dot):
+            termination_reason = "x_velocity_infinite"
+            logger.debug("Episode TERMINATED: Cart velocity is infinite")
+        elif not np.isfinite(theta):
+            termination_reason = "theta_infinite"
+            logger.debug("Episode TERMINATED: Pole angle is infinite")
+        elif not np.isfinite(theta_dot):
+            termination_reason = "theta_dot_infinite"
+            logger.debug("Episode TERMINATED: Pole angular velocity is infinite")
+
+        terminated = termination_reason is not None
+
+        if not terminated:
             reward = 1.0
-        elif self.steps_beyond_done is None:
-            self.steps_beyond_done = 0
+        elif self.steps_beyond_terminated is None:
+            # Pole just fell!
+            self.steps_beyond_terminated = 0
             reward = 1.0
-            logger.debug("Pole just fell! Steps beyond done set to 0.")
         else:
-            if self.steps_beyond_done == 0:
-                logger.warning("Calling 'step()' even though environment is done.")
-            self.steps_beyond_done += 1
+            if self.steps_beyond_terminated == 0:
+                logger.warn(
+                    "You are calling 'step()' even though this environment has already returned "
+                    "terminated = True. You should always call 'reset()' once you receive "
+                    "'terminated = True' -- any further steps are undefined behavior."
+                )
+            self.steps_beyond_terminated += 1
             reward = 0.0
 
-        logger.debug(f"Reward: {reward}")
-
-        if self.render_mode == "human":
-            self.render()
-        
+        # Prepare info dict
         info = {
-            "predicted_force": predicted_force,
-            "scaled_force": scaled_force,
-            "reward": reward
+            "predicted_force": predicted_force.item(),
+            "scaled_force": force,
+            "current_step": self.current_step
         }
         if self.predict_friction:
-            info["predicted_mu_c"] = mu_c
-            info["predicted_mu_p"] = mu_p
-        
-        self.info = info
-        logger.debug(f"Step completed. Info: {info}")
-        return np.array(self.state, dtype=np.float32), reward, done, False, info
+            info.update({
+                "friction_cart": mu_c.item(),
+                "friction_pole": mu_p.item()
+            })
 
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,))
-        self.steps_beyond_done = None
-        self.sequence_buffer = None
-        logger.debug("Environment reset.")
-        
         if self.render_mode == "human":
             self.render()
-        
-        return np.array(self.state, dtype=np.float32), {}
 
+        return np.array(self.state, dtype=np.float32), reward, terminated, False, info
+
+    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+        logger.debug("Resetting environment")
+        super().reset(seed=seed)
+        
+        # Reset step counter
+        self.current_step = 0
+        
+        # Reset state
+        low, high = -0.05, 0.05  # default reset bounds
+        self.state = self.np_random.uniform(low=low, high=high, size=(4,))
+        self.steps_beyond_terminated = None
+        self.sequence_buffer = None
+
+        if self.render_mode == "human":
+            self.render()
+
+        return np.array(self.state, dtype=np.float32), {}
+    
     def render(self):
         if self.render_mode is None:
             logger.warn("You are calling render method without specifying any render mode. "

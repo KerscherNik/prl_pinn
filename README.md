@@ -95,7 +95,14 @@ The model is trained on real CartPole demonstration data with the following stru
   You can also run a custom evaluation of your own trained model, by executing the compare_environments.py script and changing the location in the main function to you .pth file. This will wrap the model in a gymnasium environment and compare it against the original cartpole environment on a trained PPO model (on original model).
 
   ```bash
-   python compare_environments.py
+   python -m integration.compare_environments
+   ```
+
+6. Custom Visualization
+   You can run a custom visualizaton of the original and integrated environment side by side using the compare_envs_interactively.py script. Normally this will use a trained PPO model and you can observe the behavior of both environments side by side. There is also the possibility of controlling both environments simulateneously manually with your keyboard using the left and right arrow key, trying to balance the pole. You can then see directly how a taken action results in a change in both environments. To use the manual simulation change the code in the scripts main function by uncommenting the visualize_side_by_side function call at the end, and putting the original function call in a comment.
+
+   ```bash
+   python -m integration.compare_envs_interactively
    ```
 
 ## Dependencies

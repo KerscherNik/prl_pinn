@@ -300,7 +300,7 @@ if __name__ == "__main__":
 
     predict_friction = False  # Set this to True when using a model that predicts friction
     save_folder_name = "with_friction" if predict_friction else "without_friction"
-    saved_model_path = 'model_archive/trained_pinn_model_without_friction_20240922_183400.pth'
+    saved_model_path = 'model_archive/without_friction/trained_pinn_model_without_friction_20240926_145523.pth'
     loaded_model = CartpolePINN(sequence_length, predict_friction=predict_friction)
     loaded_model.load_state_dict(torch.load(saved_model_path))
 

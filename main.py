@@ -22,9 +22,11 @@ logger = logging.getLogger(__name__)
 
 def main():
     
-    ############################################################################################################
-    #    Currently best trained model: model_archive/trained_pinn_model_without_friction_20240922_183400.pth   #
-    ############################################################################################################
+    ############################################################################################################################################################################
+    #    Currently best trained model (No MSE loss, no friction coefs): model_archive/without_friction/trained_pinn_model_without_friction_20240926_145523.pth                 #
+    #    Currently best trained model (No MSE loss, with friction coefs): model_archive/with_friction/trained_pinn_model_with_friction_20240926_000026.pth                     #
+    #    Old best trained model: model_archive/trained_pinn_model_without_friction_20240922_183400.pth                                                                         #
+    ############################################################################################################################################################################
     file_paths = ["data/cartpole_data.csv"]
     sequence_length = 5  # Adjust this value as needed
 
