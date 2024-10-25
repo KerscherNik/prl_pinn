@@ -22,46 +22,11 @@ logging.basicConfig(level=logging.INFO,
 
 logger = logging.getLogger(__name__)
 
-def evaluate_env(env, model, num_episodes=100, max_steps=500):
-    """
-    Evaluate the policy on a given environment with a progress bar and step limit.
-    """
-    logger.info(f"Evaluating environment with {num_episodes} episodes, max {max_steps} steps each.")
-    rewards = []
-    steps_taken = []
-    
-    with tqdm(total=num_episodes, desc="Evaluating") as pbar:
-        for _ in range(num_episodes):
-            obs, _ = env.reset()
-            episode_reward = 0
-            step_count = 0
-            terminated = False
-            truncated = False
-            
-            while not (terminated or truncated):# and step_count < max_steps:
-                action, _ = model.predict(obs, deterministic=True)
-                obs, reward, terminated, truncated, _ = env.step(action)
-                episode_reward += reward
-                step_count += 1
-            
-            logger.debug(f"Episode reward: {episode_reward:.2f}, steps taken: {step_count}")
-            rewards.append(episode_reward)
-            steps_taken.append(step_count)
-            pbar.update(1)
-    
-    mean_reward = np.mean(rewards)
-    std_reward = np.std(rewards)
-    mean_steps = np.mean(steps_taken)
-    logger.info(f"Average episode length: {mean_steps:.2f} steps")
-    
-    # Alternative evaluation method using stable_baselines3
-    #mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=num_episodes)
-    return mean_reward, std_reward
-
-def collect_trajectory(env, model, max_steps=500, visualize=False):
+def collect_trajectory(env, model, max_steps=500, visualize=False, env_name=None):
     """
     Collect trajectory with enforced step limit.
     """
+    logger.debug("Starting trajectory collection")
     obs, _ = env.reset()
     states, actions, rewards = [], [], []
     predicted_forces, predicted_mu_c, predicted_mu_p = [], [], []
@@ -70,30 +35,37 @@ def collect_trajectory(env, model, max_steps=500, visualize=False):
     animation = create_animation(obs, max_steps, visualize)
     done = False
     truncated = False
+    
+    # Determine environment type if not explicitly provided
+    if env_name is None:
+        env_name = "PINN" if isinstance(env, PINNCartPoleEnv) else "Original"
 
-    while not (done or truncated) and step_count < max_steps:
-        action, _ = model.predict(obs, deterministic=True)
-        states.append(obs)
-        actions.append(action)
-        
-        obs, reward, terminated, truncated, info = env.step(action)
-        rewards.append(reward)
-        step_count += 1
+    with tqdm(total=max_steps, desc=f"[{env_name}] Collecting trajectory", leave=False) as pbar:
+        while not (done or truncated) and step_count < max_steps:
+            action, _ = model.predict(obs, deterministic=True)
+            states.append(obs)
+            actions.append(action)
+            
+            obs, reward, terminated, truncated, info = env.step(action)
+            rewards.append(reward)
+            step_count += 1
 
-        # Extract predictions from info dictionary
-        if "predicted_force" in info:
-            predicted_forces.append(info["predicted_force"])
-        if "predicted_mu_c" in info:
-            predicted_mu_c.append(info["predicted_mu_c"])
-        if "predicted_mu_p" in info:
-            predicted_mu_p.append(info["predicted_mu_p"])
+            # Extract predictions from info dictionary
+            if "predicted_force" in info:
+                predicted_forces.append(info["predicted_force"])
+            if "predicted_mu_c" in info:
+                predicted_mu_c.append(info["predicted_mu_c"])
+            if "predicted_mu_p" in info:
+                predicted_mu_p.append(info["predicted_mu_p"])
 
-        if visualize:
-            plot_trajectory(states, actions, rewards, visualize)
+            if visualize:
+                plot_trajectory(states, actions, rewards, visualize)
 
-        done = terminated
+            done = terminated
+            pbar.update(1)
+            pbar.set_postfix({'reward': f"{sum(rewards):.2f}"})
 
-    logger.debug(f"Trajectory collected: {len(states)} states, {len(actions)} actions, {len(predicted_forces)} forces.")
+    logger.debug(f"Trajectory collection completed: {len(states)} states, {len(actions)} actions, {len(predicted_forces)} forces.")
     
     # Convert to numpy arrays, handling empty lists
     states_array = np.array(states) if states else np.array([[]])
@@ -106,153 +78,210 @@ def collect_trajectory(env, model, max_steps=500, visualize=False):
     return (states_array, actions_array, rewards_array, 
             forces_array, mu_c_array, mu_p_array)
 
-def plot_timeline(time_steps, forces, mu_c, mu_p, save_folder_name):
+def plot_episode_timeline(time_steps, forces, mu_c, mu_p, save_path, episode):
     """
-    Plot a timeline of predicted forces and friction parameters.
+    Plot a timeline of predicted forces and friction parameters for a single episode.
     """
-    # Check if we have valid data to plot
+    logger.debug(f"Plotting timeline for episode {episode}")
     if len(forces) == 0:
-        logger.warning("No force data available for plotting timeline.")
+        logger.warning(f"No force data available for plotting timeline in episode {episode}")
         return
 
     fig, ax1 = plt.subplots(1, 1, figsize=(15, 10), sharex=True)
 
-    # Plot friction parameters only if they exist and have data
     if mu_c is not None and mu_p is not None and len(mu_c) > 0 and len(mu_p) > 0:
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
         ax2.plot(time_steps, mu_c, label='Predicted μ_c')
         ax2.plot(time_steps, mu_p, label='Predicted μ_p')
         ax2.set_ylabel('Friction Coefficient')
-        ax2.set_title('Timeline of Predicted Friction Parameters')
+        ax2.set_title(f'Timeline of Predicted Friction Parameters - Episode {episode}')
         ax2.legend()
         ax2.grid(True)
         
-    # Plot forces
     ax1.plot(time_steps, forces, label='Predicted Force')
     ax1.set_ylabel('Force')
-    ax1.set_title('Timeline of Predicted Force')
+    ax1.set_title(f'Timeline of Predicted Force - Episode {episode}')
     ax1.legend()
     ax1.grid(True)
 
     plt.xlabel('Time Steps')
     plt.tight_layout()
-    
-    # Ensure the media directory exists
-    os.makedirs(f'media/{save_folder_name}', exist_ok=True)
-    plt.savefig(f'media/{save_folder_name}/timeline_plot.png')
+    plt.savefig(f'{save_path}/timeline_plot_episode_{episode}.png')
     plt.close()
+    logger.debug(f"Timeline plot saved for episode {episode}")
 
-def compare_environments(pinn_model, params, predict_friction=False, num_episodes=100, max_steps=500, visualize=False, save_folder_name=""):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    pinn_model = pinn_model.to(device)
-
-    logger.info("Setting up environments for comparison.")
-    original_env = Monitor(gym.make('CartPole-v1'))
-    pinn_env = Monitor(PINNCartPoleEnv(pinn_model, params))
-
-    # Define the path for saving the PPO model
-    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = f'integration/ppo_model_{current_time}'
-    temp_model_path = f'integration/ppo_model_20241001_235054'  # temp placeholder with pretrained PPO
-
-    # Check if the model already exists
-    if os.path.exists("integration/ppo_model_20241001_235054.zip"):
-        logger.info(f"Loading existing PPO model from {temp_model_path}.")
-        ppo_model = PPO.load(temp_model_path, env=original_env, device=device)
-    else:
-        total_timesteps_ppo = 50000
-        logger.info(f"Training PPO agent on the original CartPole environment for {total_timesteps_ppo} total timesteps.")
-        
-        ppo_model = PPO('MlpPolicy', original_env, verbose=1, device=device)
-        ppo_model.learn(total_timesteps=total_timesteps_ppo)
-        
-        logger.info(f"Saving PPO model to {model_path}.")
-        ppo_model.save(model_path)
-
-    # Collect trajectories first
-    logger.info("Collecting trajectories from both environments.")
-    original_states, original_actions, original_rewards, _, _, _ = collect_trajectory(
-        original_env, ppo_model, max_steps, visualize)
-    pinn_states, pinn_actions, pinn_rewards, pinn_forces, pinn_mu_c, pinn_mu_p = collect_trajectory(
-        pinn_env, ppo_model, max_steps, visualize)
-
-    logger.info("Evaluating on PINN environment:")
-    pinn_mean, pinn_std = evaluate_env(pinn_env, ppo_model, num_episodes)
-    logger.info(f"PINN environment - Mean reward: {pinn_mean:.2f} +/- {pinn_std:.2f}")
-
-    logger.info("Evaluating on original environment:")
-    original_mean, original_std = evaluate_env(original_env, ppo_model, num_episodes)
-    logger.info(f"Original environment - Mean reward: {original_mean:.2f} +/- {original_std:.2f}")
-
-    logger.info("Generating force, friction, and pole angle comparison table.")
-    print(f"{'Time Step':<10}{'Predicted Force':<20}{'Pole Angle (rad)':<20}{'Predicted mu_c':<20}{'Predicted mu_p':<20}")
-    
-    # Generate the comparison table using collected trajectory data
-    for t in range(min(len(pinn_forces), max_steps)):
-        pole_angle = pinn_states[t, 2] if t < len(pinn_states) and pinn_states.ndim > 1 else float('nan')
-        force = pinn_forces[t] if t < len(pinn_forces) else float('nan')
-        mu_c = pinn_mu_c[t] if t < len(pinn_mu_c) else float('nan')
-        mu_p = pinn_mu_p[t] if t < len(pinn_mu_p) else float('nan')
-        
-        print(f"{t:<10}{force:<20.5f}{pole_angle:<20.5f}{mu_c:<20.5f}{mu_p:<20.5f}")
-
-    # Plot force comparison
-    if len(pinn_forces) > 0:
-        logger.info("Comparing predicted forces from PINN and forces from Gym.")
-        plt.figure(figsize=(10, 5))
-        plt.plot(original_env.unwrapped.force_mag * np.ones(len(original_actions)), 
-                label='Gym Forces', alpha=0.7)
-        plt.plot(pinn_forces, label='Predicted Forces (PINN)', alpha=0.7)
-        plt.title('Force Comparison: Gym vs PINN Prediction')
-        plt.xlabel('Time Step')
-        plt.ylabel('Force')
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.savefig(f'media/{save_folder_name}/force_comparison.png')
-        plt.close()
-
-    # Plot timeline
-    if len(pinn_forces) > 0:
-        time_steps = np.arange(len(pinn_forces))
-        plot_timeline(time_steps, pinn_forces, pinn_mu_c, pinn_mu_p, save_folder_name)
-    else:
-        logger.warning("No force data available for timeline plot.")
-
-    # Plot state comparisons
-    logger.info("Plotting state comparisons.")
+def plot_episode_states(original_states, pinn_states, save_path, episode):
+    """
+    Plot state comparisons for a single episode.
+    """
+    logger.debug(f"Plotting state comparisons for episode {episode}")
     fig, axs = plt.subplots(2, 2, figsize=(15, 10))
     state_labels = ['Cart Position', 'Cart Velocity', 'Pole Angle', 'Pole Angular Velocity']
     for i in range(4):
         axs[i // 2, i % 2].plot(original_states[:, i], label='Original', alpha=0.7)
         if pinn_states.ndim > 1 and pinn_states.shape[0] > 1:
             axs[i // 2, i % 2].plot(pinn_states[:, i], label='PINN', alpha=0.7)
-        axs[i // 2, i % 2].set_title(state_labels[i])
+        axs[i // 2, i % 2].set_title(f'{state_labels[i]} - Episode {episode}')
         axs[i // 2, i % 2].set_xlabel('Time Step')
         axs[i // 2, i % 2].set_ylabel('Value')
         axs[i // 2, i % 2].legend()
     plt.tight_layout()
-    plt.savefig(f'media/{save_folder_name}/state_comparison.png')
+    plt.savefig(f'{save_path}/state_comparison_episode_{episode}.png')
     plt.close()
+    logger.debug(f"State comparison plot saved for episode {episode}")
 
-    # Plot reward comparison
-    logger.info("Plotting reward comparisons.")
+def plot_episode_rewards(original_rewards, pinn_rewards, save_path, episode):
+    """
+    Plot reward comparison for a single episode.
+    """
+    logger.debug(f"Plotting reward comparisons for episode {episode}")
     plt.figure(figsize=(10, 5))
     plt.plot(np.cumsum(original_rewards), label='Original', alpha=0.7)
     plt.plot(np.cumsum(pinn_rewards), label='PINN', alpha=0.7)
-    plt.title('Cumulative Reward Comparison')
+    plt.title(f'Cumulative Reward Comparison - Episode {episode}')
     plt.xlabel('Time Step')
     plt.ylabel('Cumulative Reward')
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.7)
-    plt.savefig(f'media/{save_folder_name}/reward_comparison.png')
+    plt.savefig(f'{save_path}/reward_comparison_episode_{episode}.png')
     plt.close()
+    logger.debug(f"Reward comparison plot saved for episode {episode}")
+
+def plot_best_runs_comparison(best_original_data, best_pinn_data, save_path):
+    """
+    Plot comparison of the best runs from both environments.
+    """
+    logger.info("Creating comparison plot of best runs")
+    # Compare pole angles as the key metric
+    plt.figure(figsize=(12, 6))
+    plt.plot(best_original_data['states'][:, 2], label='Original Best Run', alpha=0.7)
+    plt.plot(best_pinn_data['states'][:, 2], label='PINN Best Run', alpha=0.7)
+    plt.title('Pole Angle Comparison of Best Runs')
+    plt.xlabel('Time Step')
+    plt.ylabel('Pole Angle (radians)')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f'{save_path}/best_runs_comparison.png')
+    plt.close()
+    logger.info("Best runs comparison plot saved")
+
+def compare_environments(pinn_model, params, predict_friction=False, num_episodes=100, max_steps=500, visualize=False, save_folder_name=""):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    pinn_model = pinn_model.to(device)
+
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_save_path = f'media/{save_folder_name}/{current_time}'
+    os.makedirs(base_save_path, exist_ok=True)
+    logger.info(f"Created output directory at {base_save_path}")
+
+    logger.info("Setting up environments for comparison.")
+    original_env = Monitor(gym.make('CartPole-v1'))
+    pinn_env = Monitor(PINNCartPoleEnv(pinn_model, params))
+
+    model_path = f'integration/ppo_model_{current_time}'
+    temp_model_path = f'integration/ppo_model_20241001_235054'
+
+    if os.path.exists("integration/ppo_model_20241001_235054.zip"):
+        logger.info(f"Loading existing PPO model from {temp_model_path}.")
+        ppo_model = PPO.load(temp_model_path, env=original_env, device=device)
+    else:
+        total_timesteps_ppo = 50000
+        logger.info(f"Training PPO agent for {total_timesteps_ppo} timesteps.")
+        ppo_model = PPO('MlpPolicy', original_env, verbose=1, device=device)
+        ppo_model.learn(total_timesteps=total_timesteps_ppo)
+        logger.info(f"Saving PPO model to {model_path}")
+        ppo_model.save(model_path)
+
+    # Initialize storage for best runs and all rewards
+    best_original_run = {'reward': float('-inf'), 'states': None, 'actions': None, 'rewards': None}
+    best_pinn_run = {'reward': float('-inf'), 'states': None, 'actions': None, 'rewards': None, 
+                     'forces': None, 'mu_c': None, 'mu_p': None}
+    
+    # Lists to store all episode rewards for statistical analysis
+    original_episode_rewards = []
+    pinn_episode_rewards = []
+
+    # Evaluate episodes
+    logger.info(f"Starting evaluation of {num_episodes} episodes")
+    with tqdm(total=num_episodes, desc="Evaluating episodes") as pbar:
+        for episode in range(num_episodes):
+            logger.info(f"Starting episode {episode + 1}/{num_episodes}")
+            episode_path = f'{base_save_path}/episode_{episode}'
+            os.makedirs(episode_path, exist_ok=True)
+
+            # Collect trajectories for this episode
+            logger.debug(f"Collecting trajectories for episode {episode}")
+            original_states, original_actions, original_rewards, _, _, _ = collect_trajectory(
+                original_env, ppo_model, max_steps, visualize, env_name="Original")
+            pinn_states, pinn_actions, pinn_rewards, pinn_forces, pinn_mu_c, pinn_mu_p = collect_trajectory(
+                pinn_env, ppo_model, max_steps, visualize, env_name="PINN")
+
+            # Plot episode-specific visualizations
+            logger.debug(f"Creating visualizations for episode {episode}")
+            plot_episode_timeline(np.arange(len(pinn_forces)), pinn_forces, pinn_mu_c, pinn_mu_p, 
+                                episode_path, episode)
+            plot_episode_states(original_states, pinn_states, episode_path, episode)
+            plot_episode_rewards(original_rewards, pinn_rewards, episode_path, episode)
+
+            # Calculate total rewards for this episode
+            original_total_reward = np.sum(original_rewards)
+            pinn_total_reward = np.sum(pinn_rewards)
+            
+            # Store episode rewards for statistical analysis
+            original_episode_rewards.append(original_total_reward)
+            pinn_episode_rewards.append(pinn_total_reward)
+
+            # Update best runs based on total reward
+            if original_total_reward > best_original_run['reward']:
+                logger.info(f"New best original run found in episode {episode} with reward {original_total_reward:.2f}")
+                best_original_run = {
+                    'reward': original_total_reward,
+                    'states': original_states,
+                    'actions': original_actions,
+                    'rewards': original_rewards
+                }
+
+            if pinn_total_reward > best_pinn_run['reward']:
+                logger.info(f"New best PINN run found in episode {episode} with reward {pinn_total_reward:.2f}")
+                best_pinn_run = {
+                    'reward': pinn_total_reward,
+                    'states': pinn_states,
+                    'actions': pinn_actions,
+                    'rewards': pinn_rewards,
+                    'forces': pinn_forces,
+                    'mu_c': pinn_mu_c,
+                    'mu_p': pinn_mu_p
+                }
+
+            logger.info(f"Results for episode {episode}: Original Reward: {original_total_reward:.2f}, PINN Reward: {pinn_total_reward:.2f}")
+
+            pbar.update(1)
+            pbar.set_postfix({
+                'Best Original': f"{best_original_run['reward']:.2f}",
+                'Best PINN': f"{best_pinn_run['reward']:.2f}"
+            })
+
+    # Calculate and log statistical measures
+    original_mean = np.mean(original_episode_rewards)
+    original_std = np.std(original_episode_rewards)
+    pinn_mean = np.mean(pinn_episode_rewards)
+    pinn_std = np.std(pinn_episode_rewards)
+
+    logger.info("\nFinal Statistical Results:")
+    logger.info(f"Original Environment - Mean Reward: {original_mean:.2f} ± {original_std:.2f}")
+    logger.info(f"PINN Environment - Mean Reward: {pinn_mean:.2f} ± {pinn_std:.2f}")
+    logger.info(f"Best Original Run Reward: {best_original_run['reward']:.2f}")
+    logger.info(f"Best PINN Run Reward: {best_pinn_run['reward']:.2f}")
+
+    logger.info("Plotting final comparison of best runs")
+    plot_best_runs_comparison(best_original_run, best_pinn_run, base_save_path)
 
     # Close environments
     logger.info("Closing environments.")
     original_env.close()
     pinn_env.close()
 
-    return original_rewards, pinn_rewards
+    return best_original_run, best_pinn_run
 
 
 if __name__ == "__main__":
